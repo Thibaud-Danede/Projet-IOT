@@ -7,10 +7,15 @@
 * Author : O. Patrouix ESTIA
 * Date : 29/09/2021
 *********************************/
+// Include des classes
+#include "ESP-D1_Functions.h"
+
+
 // Include pour index.html
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
+
 
 // Paramètres du serveur
 ESP8266WebServer server(80);
@@ -72,56 +77,6 @@ enum MenuState {
 
 MenuState menu = MENU_MAIN;
 
-/* =======================================================================
-   SETUP WEBPAGE
-   ======================================================================= */
-String getPage() {
-
-  String html = R"rawliteral(
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<title>DHT Monitor</title>
-<style>
-  body { font-family: Arial; text-align: center; background: #eef; padding-top: 40px; }
-  .box { display: inline-block; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 0 10px #aaa; }
-  h1 { color: #006; }
-  .value { font-size: 2em; color: #333; }
-</style>
-</head>
-<body>
-
-<h1>Mesures du capteur DHT11</h1>
-<div class="box">
-  <p>Humidité : <span id="hum">--</span> %</p>
-  <p>Température : <span id="temp">--</span> °C</p>
-  <p>Heat Index : <span id="hi">--</span></p>
-</div>
-
-<script>
-function updateDHT() {
-  fetch("/dht")
-    .then(response => response.json())
-    .then(data => {
-      document.getElementById("hum").textContent = data.humidity.toFixed(1);
-      document.getElementById("temp").textContent = data.temperature.toFixed(1);
-      document.getElementById("hi").textContent = data.heatindex.toFixed(1);
-    })
-    .catch(err => console.log("Erreur:", err));
-}
-
-setInterval(updateDHT, 1000); // mise à jour toutes les secondes
-updateDHT(); // mise à jour immédiate au chargement
-</script>
-
-</body>
-</html>
-)rawliteral";
-
-  return html;
-}
-
 
 /* =======================================================================
    WEB HANDLES
@@ -166,9 +121,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
 
-  // Start DHT
   dht.begin();
-
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
@@ -177,56 +130,105 @@ void setup() {
 
   showMainMenu();
 
-  // initialize digital esp8266 gpio 0 as an output. MODIFIER GPIO
   pinMode(WEB0, OUTPUT);
   digitalWrite(WEB0, HIGH);
-  // initialize digital esp8266 gpio 2 as an output. MODIFIER GPIO
+
   pinMode(WEB2, OUTPUT);
   digitalWrite(WEB2, LOW);
 
-
-  //SETUP WEB
-  // Setup the WIFI access point 
+  // -------- WIFI ACCESS POINT --------
   WiFi.mode(WIFI_AP);
-  // Change the IP address 
   WiFi.softAPConfig(local_IP, gateway, subnet);
-  /* You can remove the password parameter if you want the AP to be open. */
   WiFi.softAP(ssid, password);
-  // Get IP to see if IP is not default 192.168.4.1 
+
   myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
-  server.on("/", handleRoot);
-  server.on("/open", handleOpen);
-  server.on("/close", handleClose);
+
+  // -------- WEB HANDLERS --------
+
+  // Page principale HTML
+  server.on("/", []() {
+      Serial.println(">>>WEB EVENT>>> Appel de l'index du site");
+      server.send(200, "text/html", getPage());
+  });
+
+  // Données JSON du DHT
+  server.on("/dht", []() {
+      server.send(200, "application/json", getDHTjson(humidity, temperature, heatIndex));
+  });
+
+  // Commandes contrôle DHT
+  server.on("/startDHT", []() {
+      menu = MENU_DHT;
+      Serial.println(">>>WEB EVENT>>> DHT START depuis le site");
+      server.send(200, "text/plain", "DHT acquisition started");
+  });
+
+  server.on("/stopDHT", []() {
+      menu = MENU_MAIN;
+      Serial.println(">>>WEB EVENT>>> DHT STOP depuis le site");
+      server.send(200, "text/plain", "DHT acquisition stopped");
+  });
+
+  // Commandes contrôle bouton
+  server.on("/startButton", []() {
+      menu = MENU_BUTTON;
+      Serial.println(">>>WEB EVENT>>> Bouton START depuis le site");
+      server.send(200, "text/plain", "Button acquisition started");
+  });
+
+  server.on("/stopButton", []() {
+      menu = MENU_MAIN;
+      Serial.println(">>>WEB EVENT>>> Bouton STOP depuis le site");
+      server.send(200, "text/plain", "Button acquisition stopped");
+  });
+
+  server.on("/dhtState", []() {
+    String json = "{";
+    json += "\"active\":" + String(menu == MENU_DHT ? "true" : "false");
+    json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  server.on("/dhtInterval", []() {  
+    String json = "{";
+    json += "\"interval\":" + String(dhtInterval); 
+    json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  server.on("/setDHTinterval", []() {
+    if (!server.hasArg("value")) {
+        server.send(400, "text/plain", "Missing value");
+        return;
+    }
+    int newVal = server.arg("value").toInt();
+    if (newVal < 100) newVal = 100;  // protection
+
+    dhtInterval = newVal;
+    Serial.print(">>>WEB EVENT>>> Nouvelle intervale à ");
+    Serial.print(newVal);
+    Serial.println(" ms depuis le site");
+    server.send(200, "text/plain", "OK");
+  });
+
+
+
   server.begin();
   Serial.println("HTTP server started");
-
-  //Handler de la page WEB
-  server.on("/", []() {
-  server.send(200, "text/html", getPage());
-  });
-  server.on("/dht", []() {
-  String json = "{";
-  json += "\"humidity\":" + String(humidity, 1) + ",";
-  json += "\"temperature\":" + String(temperature, 1) + ",";
-  json += "\"heatindex\":" + String(heatIndex, 1);
-  json += "}";
-
-  server.send(200, "application/json", json);
-  });
-
-
 }
+
+
 
 /* =======================================================================
    MENU AFFICHAGE
    ======================================================================= */
 void showMainMenu() {
   Serial.println("\n======== MENU PRINCIPAL ========");
-  Serial.println("Tapez dans l'invite de commande le paramètre que vous voulez régler");
-  Serial.println("1 : Gérer l'acquisition du bouton");
-  Serial.println("2 : Gérer l'acquisition du dht");
+  Serial.println("Tapez dans l'invite de commande le numéro du paramètre que vous voulez régler");
+  Serial.println("1 : Vidualiser et Gérer l'acquisition du bouton");
+  Serial.println("2 : Visualiser et Gérer l'acquisition du dht");
 }
 
 void showButtonMenu() {
@@ -234,15 +236,15 @@ void showButtonMenu() {
   Serial.println("Affichage des valeurs du bouton...");
   Serial.println("Commandes disponibles :");
   Serial.println("  BUTTONSET <ms>   : changer intervalle lecture");
-  Serial.println("  RETURN           : retour au menu principal\n");
+  Serial.println("  RETURN ou MENU   : retour au menu principal\n");
 }
 
 void showDHTMenu() {
   Serial.println("\n=== MENU DHT ===");
   Serial.println("Affichage des valeurs du dht...");
   Serial.println("Commandes disponibles :");
-  Serial.println("  DHTSET <ms>   : changer intervalle lecture");
-  Serial.println("  RETURN        : retour au menu principal\n");
+  Serial.println("  DHTSET <ms>     : changer intervalle lecture");
+  Serial.println("  RETURN ou MENU  : retour au menu principal\n");
 }
 
 
@@ -353,11 +355,12 @@ void parseCommand(String cmd) {
   if (menu == MENU_BUTTON) {
 
     // Retour au menu principal
-    if (cmd == "RETURN") {
-      menu = MENU_MAIN;
-      showMainMenu();
-      return;
+    if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
+    menu = MENU_MAIN;
+    showMainMenu();
+    return;
     }
+
 
     // BUTTONSET <ms>
     if (cmd.startsWith("BUTTONSET")) {
@@ -385,13 +388,13 @@ void parseCommand(String cmd) {
   if (menu == MENU_DHT) {
 
     // Retour au menu principal
-    if (cmd == "RETURN") {
-      menu = MENU_MAIN;
-      showMainMenu();
-      return;
+    if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
+    menu = MENU_MAIN;
+    showMainMenu();
+    return;
     }
 
-    // BUTTONSET <ms>
+    // DHTSET <ms>
     if (cmd.startsWith("DHTSET")) {
 
       String valueStr = cmd.substring(6);
@@ -402,7 +405,7 @@ void parseCommand(String cmd) {
         dhtInterval = newInterval;
         Serial.print("Nouvel intervalle = ");
         Serial.print(dhtInterval);
-        Serial.println(" ms");
+        Serial.println(" ms depuis la console");
       } else {
         Serial.println("Erreur: donnée non valide.");
       }
