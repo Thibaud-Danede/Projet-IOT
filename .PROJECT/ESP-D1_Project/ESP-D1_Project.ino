@@ -10,21 +10,29 @@
 
 #include "ESP-D1_GPIO.h"
 
-/* ------------------------- CONFIGURATION PINS ------------------------- */
+/* ---------------- PINS ---------------- */
 const int LED_PIN = D5;
-const int BUTTON_PIN = D7;   // Pull-up interne → appuyé = LOW
+const int BUTTON_PIN = D7;
 
-/* --------------------------- ETATS COURANTS --------------------------- */
-int buttonState = LOW;      // état du bouton D7
-int ledState = LOW;          // état LED D5
+/* ---------------- ETATS ---------------- */
+int buttonState = LOW;
+int ledState = LOW;
 
-/* ----------------------------- TIMERS --------------------------------- */
-long previousMillisBtn = 0;       // Comparatif utilisé par la fonction Millis
-const long buttonInterval = 50;   // lecture toutes les 50 ms (anti rebond)
+/* ---------------- TIMERS ---------------- */
+long previousMillisBtn = 0;
+long buttonInterval = 500;
 
-/* --------------------------- SERIAL BUFFER ---------------------------- */
+/* ---------------- SERIAL ---------------- */
 String inputString = "";
 bool stringComplete = false;
+
+/* ---------------- MENU ---------------- */
+enum MenuState {
+  MENU_MAIN,
+  MENU_BUTTON
+};
+
+MenuState menu = MENU_MAIN;
 
 
 /* =======================================================================
@@ -34,24 +42,31 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);  // IMPORTANT
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
   delay(300);
   Serial.println("\nBOOT ESP-D1 ready to work");
+
+  showMainMenu();
 }
 
-
 /* =======================================================================
-   doEvery : exécuter une action toutes les X millisecondes
+   MENU AFFICHAGE
    ======================================================================= */
-void doEvery(long intervalMillis, long *previousMillis, void (*action)()) {
-  unsigned long currentMillis = millis();
+void showMainMenu() {
+  Serial.println("\n======== MENU PRINCIPAL ========");
+  Serial.println("Tapez dans l'invite de commande le paramètre que vous voulez régler");
+  Serial.println("1 : Gérer l'acquisition du bouton");
+  Serial.println("2 : (option future)");
+}
 
-  if (currentMillis - *previousMillis >= intervalMillis) {
-    *previousMillis = currentMillis;
-    action();
-  }
+void showButtonMenu() {
+  Serial.println("\n=== MENU BOUTON ===");
+  Serial.println("Affichage des valeurs du bouton...");
+  Serial.println("Commandes disponibles :");
+  Serial.println("  BUTTONSET <ms>   : changer intervalle lecture");
+  Serial.println("  RETURN           : retour au menu principal\n");
 }
 
 
@@ -60,14 +75,16 @@ void doEvery(long intervalMillis, long *previousMillis, void (*action)()) {
    ======================================================================= */
 void loop() {
 
-  // Lecture bouton périodique
-  doEvery(buttonInterval, &previousMillisBtn, readButton);
+  // Lecture bouton seulement dans le menu bouton
+  if (menu == MENU_BUTTON) {
+    doEvery(buttonInterval, &previousMillisBtn, readButton);
+  }
 
-  // Gestion entrée série
+  // Lecture série
   serialEvent();
 
   if (stringComplete) {
-    Serial.print(inputString);
+    parseCommand(inputString);
     inputString = "";
     stringComplete = false;
   }
@@ -75,16 +92,15 @@ void loop() {
 
 
 /* =======================================================================
-   Fonction de lecture du bouton
+   Fonction lecture bouton
    ======================================================================= */
 void readButton() {
-
   int state = digitalRead(BUTTON_PIN);
 
-  if (state == LOW) {         // bouton appuyé
+  if (state == LOW) {
     buttonState = LOW;
     ledState = LOW;
-  } else {                    // bouton relâché
+  } else {
     buttonState = HIGH;
     ledState = HIGH;
   }
@@ -97,17 +113,88 @@ void readButton() {
 
 
 /* =======================================================================
-   Réception série non bloquante
+   Analyse des commandes utilisateur
+   ======================================================================= */
+void parseCommand(String cmd) {
+
+  cmd.trim();
+
+  /* === COMMANDE MENU PRINCIPAL === */
+  if (menu == MENU_MAIN) {
+
+    if (cmd == "1") {
+      menu = MENU_BUTTON;
+      showButtonMenu();
+      return;
+    }
+
+    if (cmd == "2") {
+      Serial.println("Option 2 non encore implémentée.");
+      showMainMenu();
+      return;
+    }
+
+    Serial.println("Commande inconnue.");
+    showMainMenu();
+    return;
+  }
+
+
+  /* === COMMANDE MENU BOUTON === */
+  if (menu == MENU_BUTTON) {
+
+    // Retour au menu principal
+    if (cmd == "RETURN") {
+      menu = MENU_MAIN;
+      showMainMenu();
+      return;
+    }
+
+    // BUTTONSET <ms>
+    if (cmd.startsWith("BUTTONSET")) {
+
+      String valueStr = cmd.substring(9);
+      valueStr.trim();
+      long newInterval = valueStr.toInt();
+
+      if (newInterval > 0) {
+        buttonInterval = newInterval;
+        Serial.print("Nouvel intervalle = ");
+        Serial.print(buttonInterval);
+        Serial.println(" ms");
+      } else {
+        Serial.println("Erreur: donnée non valide.");
+      }
+      return;
+    }
+
+    Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
+    return;
+  }
+}
+
+
+/* =======================================================================
+   Réception série
    ======================================================================= */
 void serialEvent() {
-
   while (Serial.available() > 0) {
     char inChar = (char)Serial.read();
     inputString += inChar;
-
-    if (inChar == '\n') {
-      stringComplete = true;
-    }
+    if (inChar == '\n') stringComplete = true;
   }
 }
+
+
+/* =======================================================================
+   doEvery
+   ======================================================================= */
+void doEvery(long intervalMillis, long *previousMillis, void (*action)()) {
+  unsigned long currentMillis = millis();
+  if (currentMillis - *previousMillis >= intervalMillis) {
+    *previousMillis = currentMillis;
+    action();
+  }
+}
+
 
