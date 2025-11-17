@@ -7,22 +7,41 @@
 * Author : O. Patrouix ESTIA
 * Date : 29/09/2021
 *********************************/
+// Include pour index.html
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
 
+// Paramètres du serveur
+ESP8266WebServer server(80);
+const char* ssid = "!!?AA?!!";
+const char* password = "12345678";
+IPAddress local_IP(192,168,4,99);
+IPAddress gateway(192,168,4,99);
+IPAddress subnet(255,255,255,0);
+IPAddress myIP;
+
+// Include des librairies locales
 #include "ESP-D1_GPIO.h"
-
 #include "DHT.h"
-
 #define DHTTYPE DHT11
 
 /* ---------------- PINS ---------------- */
 const int LED_PIN = D5;
 const int BUTTON_PIN = D7;
 const int DHT_PIN = D4;
+// GPIO à modifier plus tard pour la partie web
+const int WEB0 =  GPIO_0;      
+const int WEB2 =  GPIO_2;      
 
 /* ---------------- ETATS ---------------- */
 int buttonState = LOW;
 int ledState = LOW;
 int dhtState = LOW;
+// Variables web (changer le nom GPIO)
+int StateWEB0 = HIGH;           
+int StateWEB2 = LOW;            
+       
 
 /* -------------- DHT OBJECT -------------- */
 float humidity;
@@ -37,6 +56,8 @@ long previousMillisBtn = 0;
 long previousMillisDHT = 0;
 long buttonInterval = 500;
 long dhtInterval = 500;
+// Timer web changer le nom plus tard
+long previousMillis_2 = 0; 
 
 /* ---------------- SERIAL ---------------- */
 String inputString = "";
@@ -51,6 +72,92 @@ enum MenuState {
 
 MenuState menu = MENU_MAIN;
 
+/* =======================================================================
+   SETUP WEBPAGE
+   ======================================================================= */
+String getPage() {
+
+  String html = R"rawliteral(
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>DHT Monitor</title>
+<style>
+  body { font-family: Arial; text-align: center; background: #eef; padding-top: 40px; }
+  .box { display: inline-block; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 0 10px #aaa; }
+  h1 { color: #006; }
+  .value { font-size: 2em; color: #333; }
+</style>
+</head>
+<body>
+
+<h1>Mesures du capteur DHT11</h1>
+<div class="box">
+  <p>Humidité : <span id="hum">--</span> %</p>
+  <p>Température : <span id="temp">--</span> °C</p>
+  <p>Heat Index : <span id="hi">--</span></p>
+</div>
+
+<script>
+function updateDHT() {
+  fetch("/dht")
+    .then(response => response.json())
+    .then(data => {
+      document.getElementById("hum").textContent = data.humidity.toFixed(1);
+      document.getElementById("temp").textContent = data.temperature.toFixed(1);
+      document.getElementById("hi").textContent = data.heatindex.toFixed(1);
+    })
+    .catch(err => console.log("Erreur:", err));
+}
+
+setInterval(updateDHT, 1000); // mise à jour toutes les secondes
+updateDHT(); // mise à jour immédiate au chargement
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+  return html;
+}
+
+
+/* =======================================================================
+   WEB HANDLES
+   ======================================================================= */
+// To Do on http://192.168.4.XX/
+// Set WEB0 to HIGH <=> relay opened
+void handleRoot() {
+  //server.send(200, "text/html", "<h1>You are connected</h1>");
+  server.send(200, "text/html", getPage());
+  digitalWrite(WEB0, HIGH);
+}
+// To Do on http://192.168.4.XX/open
+// Set WEB0 to LOW for 500ms <=> relay closed
+void handleOpen() {
+  //server.send(200, "text/html", "<h1>Gate Opening</h1>");
+  server.send(200, "text/html", getPage());
+  // set the LED with the ledState of the variable:
+  StateWEB0 = LOW;
+  digitalWrite(WEB0, StateWEB0);
+  delay(500);
+  StateWEB0 = HIGH;
+  digitalWrite(WEB0, StateWEB0);
+}
+
+// To Do on http://192.168.4.XX/close
+// Set WEB0 to LOW for 500ms <=> relay closed
+void handleClose() {
+  //server.send(200, "text/html", "<h1>Gate Closing</h1>");
+  server.send(200, "text/html", getPage());
+  // set the LED with the ledState of the variable:
+  StateWEB0 = LOW;
+  digitalWrite(WEB0, StateWEB0);
+  delay(500);
+  StateWEB0 = HIGH;
+  digitalWrite(WEB0, StateWEB0);
+}
 
 /* =======================================================================
    SETUP
@@ -58,9 +165,6 @@ MenuState menu = MENU_MAIN;
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
-
-  // pinMode(DHT_PIN, OUTPUT);
-  // digitalWrite(DHT_PIN, dhtState);
 
   // Start DHT
   dht.begin();
@@ -72,6 +176,47 @@ void setup() {
   Serial.println("\nBOOT ESP-D1 ready to work");
 
   showMainMenu();
+
+  // initialize digital esp8266 gpio 0 as an output. MODIFIER GPIO
+  pinMode(WEB0, OUTPUT);
+  digitalWrite(WEB0, HIGH);
+  // initialize digital esp8266 gpio 2 as an output. MODIFIER GPIO
+  pinMode(WEB2, OUTPUT);
+  digitalWrite(WEB2, LOW);
+
+
+  //SETUP WEB
+  // Setup the WIFI access point 
+  WiFi.mode(WIFI_AP);
+  // Change the IP address 
+  WiFi.softAPConfig(local_IP, gateway, subnet);
+  /* You can remove the password parameter if you want the AP to be open. */
+  WiFi.softAP(ssid, password);
+  // Get IP to see if IP is not default 192.168.4.1 
+  myIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(myIP);
+  server.on("/", handleRoot);
+  server.on("/open", handleOpen);
+  server.on("/close", handleClose);
+  server.begin();
+  Serial.println("HTTP server started");
+
+  //Handler de la page WEB
+  server.on("/", []() {
+  server.send(200, "text/html", getPage());
+  });
+  server.on("/dht", []() {
+  String json = "{";
+  json += "\"humidity\":" + String(humidity, 1) + ",";
+  json += "\"temperature\":" + String(temperature, 1) + ",";
+  json += "\"heatindex\":" + String(heatIndex, 1);
+  json += "}";
+
+  server.send(200, "application/json", json);
+  });
+
+
 }
 
 /* =======================================================================
@@ -122,6 +267,9 @@ void loop() {
     inputString = "";
     stringComplete = false;
   }
+
+  //Handle
+  server.handleClient();
 }
 
 
