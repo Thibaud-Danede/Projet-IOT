@@ -7,29 +7,43 @@
 * Author : O. Patrouix ESTIA
 * Date : 29/09/2021
 *********************************/
+
+/* =======================================================================
+   DECLARATIONS DE DEBUT DE PROGRAMME
+   ======================================================================= */
+
 // Include des classes
 #include "ESP-D1_Functions.h"
-
 
 // Include pour index.html
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 
-
-// Paramètres du serveur
-ESP8266WebServer server(80);
-const char* ssid = "!!?AA?!!";
-const char* password = "12345678";
-IPAddress local_IP(192,168,4,99);
-IPAddress gateway(192,168,4,99);
-IPAddress subnet(255,255,255,0);
-IPAddress myIP;
-
 // Include des librairies locales
 #include "ESP-D1_GPIO.h"
 #include "DHT.h"
 #define DHTTYPE DHT11
+
+
+/* -------------- RESEAU -------------- */
+// Paramètres du serveur en AP
+ESP8266WebServer server(80);
+const char* AP_ssid = "!!?AA?!!";
+const char* AP_password = "12345678";
+IPAddress local_IP(192,168,4,99);
+IPAddress gateway(192,168,4,99);
+IPAddress subnet(255,255,255,0);
+IPAddress AP_myIP;
+
+// Paramètres du serveur en WS
+const char* WS_ssid = "IIoT_A";
+const char* WS_password = "IIoT_AS3";
+IPAddress WS_local_IP(192,168,1,30);
+IPAddress WS_gateway(192,168,1,12);
+IPAddress WS_subnet(255,255,255,0);
+IPAddress WS_myIP;
+
 
 /* ---------------- PINS ---------------- */
 const int LED_PIN = D5;
@@ -39,21 +53,28 @@ const int DHT_PIN = D4;
 const int WEB0 =  GPIO_0;      
 const int WEB2 =  GPIO_2;      
 
+
 /* ---------------- ETATS ---------------- */
 int buttonState = LOW;
 int ledState = LOW;
 int dhtState = LOW;
 // Variables web (changer le nom GPIO)
 int StateWEB0 = HIGH;           
-int StateWEB2 = LOW;            
+int StateWEB2 = LOW;     
+// Etats Wifi
+enum WifiModeState { 
+  WIFI_MODE_AP, 
+  WIFI_MODE_WS 
+};
+WifiModeState wifiMode = WIFI_MODE_AP;   // démarrage par défaut en AP
        
 
-/* -------------- DHT OBJECT -------------- */
+/* ------------- VARIABLES DHT ------------- */
 float humidity;
 float temperature;
 float heatIndex;
 
-/* -------- IINITIALIZE DHT SENSOR -------- */
+/* ------ INTITIALISATION DHT SENSOR ------ */
 DHT dht(DHT_PIN, DHTTYPE);
 
 /* ---------------- TIMERS ---------------- */
@@ -72,7 +93,8 @@ bool stringComplete = false;
 enum MenuState {
   MENU_MAIN,
   MENU_BUTTON,
-  MENU_DHT
+  MENU_DHT,
+  MENU_WIFI
 };
 
 MenuState menu = MENU_MAIN;
@@ -136,14 +158,9 @@ void setup() {
   pinMode(WEB2, OUTPUT);
   digitalWrite(WEB2, LOW);
 
-  // -------- WIFI ACCESS POINT --------
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(local_IP, gateway, subnet);
-  WiFi.softAP(ssid, password);
+  // -------- WIFI MANAGEMENT --------
+  applyWifiMode();
 
-  myIP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(myIP);
 
   // -------- WEB HANDLERS --------
 
@@ -213,8 +230,6 @@ void setup() {
     server.send(200, "text/plain", "OK");
   });
 
-
-
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -229,6 +244,7 @@ void showMainMenu() {
   Serial.println("Tapez dans l'invite de commande le numéro du paramètre que vous voulez régler");
   Serial.println("1 : Vidualiser et Gérer l'acquisition du bouton");
   Serial.println("2 : Visualiser et Gérer l'acquisition du dht");
+  Serial.println("3 : Visualiser et Gérer l'accès wifi");
 }
 
 void showButtonMenu() {
@@ -246,6 +262,18 @@ void showDHTMenu() {
   Serial.println("  DHTSET <ms>     : changer intervalle lecture");
   Serial.println("  RETURN ou MENU  : retour au menu principal\n");
 }
+
+void showWifiMenu() {
+  Serial.println("\n=== MENU WIFI ===");
+  Serial.print("Mode actuel : ");
+  Serial.println(wifiMode == WIFI_MODE_AP ? "AP" : "STA");
+
+  Serial.println("Commandes disponibles :");
+  Serial.println("       AP        : passer en Access Point");
+  Serial.println("       STA       : passer en Station");
+  Serial.println("  RETURN ou MENU : retour au menu principal\n");
+}
+
 
 
 /* =======================================================================
@@ -329,22 +357,24 @@ void parseCommand(String cmd) {
 
   cmd.trim();
 
-  /* === COMMANDE MENU PRINCIPAL === */
+  /* --- COMMANDE MENU PRINCIPAL --- */
   if (menu == MENU_MAIN) {
-
     if (cmd == "1") {
       menu = MENU_BUTTON;
       showButtonMenu();
       return;
     }
-
     if (cmd == "2") {
       //Serial.println("Option 2 non encore implémentée.");
       menu = MENU_DHT;
       showDHTMenu();
       return;
     }
-
+    if (cmd == "3") {
+      menu = MENU_WIFI;
+      showWifiMenu();
+      return;
+    }
     Serial.println("Commande inconnue.");
     showMainMenu();
     return;
@@ -415,7 +445,93 @@ void parseCommand(String cmd) {
     Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
     return;
   }
+  /* === COMMANDE MENU WIFI === */
+  if (menu == MENU_WIFI) {
+
+    if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
+      menu = MENU_MAIN;
+      showMainMenu();
+      return;
+    }
+
+    if (cmd.equalsIgnoreCase("AP")) {
+      wifiMode = WIFI_MODE_AP;
+      applyWifiMode();
+      Serial.println("Mode AP activé.");
+      showWifiMenu();
+      return;
+    }
+
+    if (cmd.equalsIgnoreCase("STA")) {
+      wifiMode = WIFI_MODE_WS;
+      applyWifiMode();
+      //Serial.println("Mode STA activé.");
+      showWifiMenu();
+      return;
+    }
+
+    Serial.println("Commande inconnue.");
+    showWifiMenu();
+    return;
+  }
+
 }
+
+/* =======================================================================
+   Wifi mode State
+   ======================================================================= */
+void applyWifiMode() {
+
+  if (wifiMode == WIFI_MODE_AP) {
+    Serial.println("Basculer en mode ACCESS POINT...");
+    
+    WiFi.disconnect(true);
+    delay(200);
+
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(local_IP, gateway, subnet);
+    WiFi.softAP(AP_ssid, AP_password);
+
+    AP_myIP = WiFi.softAPIP();
+
+    Serial.print("AP IP address: ");
+    Serial.println(AP_myIP);
+  }
+
+  if (wifiMode == WIFI_MODE_WS) {
+
+    Serial.println("Basculer en mode STATION...");
+
+    WiFi.disconnect(true);
+    delay(200);
+
+    WiFi.mode(WIFI_STA);
+    WiFi.config(WS_local_IP, WS_gateway, WS_subnet);
+    WiFi.begin(WS_ssid, WS_password);
+
+    Serial.print("Connexion au réseau STA...");
+
+    int timeout = 0;
+    while (WiFi.status() != WL_CONNECTED && timeout < 50) {
+      delay(200);
+      Serial.print(".");
+      timeout++;
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      WS_myIP = WiFi.localIP();
+      Serial.print("Connecté ! IP : ");
+      Serial.println(WS_myIP);
+    } 
+    else {
+      Serial.println("Échec de connexion STA, Retour mode AP");
+      wifiMode = WIFI_MODE_AP;
+      applyWifiMode();
+    }
+  }
+}
+
 
 
 /* =======================================================================
