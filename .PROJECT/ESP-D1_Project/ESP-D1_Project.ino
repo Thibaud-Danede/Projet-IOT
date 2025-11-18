@@ -106,7 +106,7 @@ MenuState menu = MENU_MAIN;
 
 /* ---------------- CONFIG MQTT ---------------- */
 const char* mqtt_server = "192.168.1.2";
-const char* mqtt_topic  = "IIoT_DHT";
+const char* mqtt_topic  = "Greg";
 const char* mqtt_user   = "usr10";
 const char* mqtt_pass   = "usr10";
 const char* clientID    = "Greg";
@@ -367,12 +367,7 @@ void readDHT() {
     Serial.println(heatIndex);
 
     // MQTT publication 
-    String payload = "{";
-    payload += "\"humidity\":" + String(humidity,1) + ",";
-    payload += "\"temperature\":" + String(temperature,1) + ",";
-    payload += "\"heatIndex\":" + String(heatIndex,1);
-    payload += "}";
-
+    String payload = "{\"humidity\":" + String(humidity,1) + ",\"temperature\":" + String(temperature,1) + ",\"heatIndex\":" + String(heatIndex,1) + ",\"signature\":\"Thibaud\"}";
     mqttPublish(payload);
   }
 }
@@ -595,6 +590,11 @@ void connectMQTT() {
 
   if (mqttClient.connect(clientID, mqtt_user, mqtt_pass)) {
     Serial.println("OK !");
+    Serial.print("Connecté au Topic ");
+    Serial.print(mqtt_topic);
+    Serial.print(" en tant que ");
+    Serial.println(mqtt_user);
+
   } else {
     Serial.print("Échec, code = ");
     Serial.println(mqttClient.state());
