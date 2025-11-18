@@ -25,6 +25,9 @@
 #include "DHT.h"
 #define DHTTYPE DHT11
 
+// Include de la librairie MQTT
+#include <PubSubClient.h>
+
 
 /* -------------- RESEAU -------------- */
 // Paramètres du serveur en AP
@@ -84,6 +87,8 @@ long buttonInterval = 500;
 long dhtInterval = 500;
 // Timer web changer le nom plus tard
 long previousMillis_2 = 0; 
+// Contrôle etat MQTT
+long lastReconnectAttempt = 0;
 
 /* ---------------- SERIAL ---------------- */
 String inputString = "";
@@ -98,6 +103,16 @@ enum MenuState {
 };
 
 MenuState menu = MENU_MAIN;
+
+/* ---------------- CONFIG MQTT ---------------- */
+const char* mqtt_server = "192.168.1.2";
+const char* mqtt_topic  = "IIoT_DHT";
+const char* mqtt_user   = "usr10";
+const char* mqtt_pass   = "usr10";
+const char* clientID    = "Greg";
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
 
 /* =======================================================================
@@ -163,7 +178,6 @@ void setup() {
 
 
   // -------- WEB HANDLERS --------
-
   // Page principale HTML
   server.on("/", []() {
       Serial.println(">>>WEB EVENT>>> Appel de l'index du site");
@@ -179,27 +193,29 @@ void setup() {
   server.on("/startDHT", []() {
       menu = MENU_DHT;
       Serial.println(">>>WEB EVENT>>> DHT START depuis le site");
+      mqttPublish("DHT START");
       server.send(200, "text/plain", "DHT acquisition started");
   });
 
   server.on("/stopDHT", []() {
       menu = MENU_MAIN;
       Serial.println(">>>WEB EVENT>>> DHT STOP depuis le site");
+      mqttPublish("DHT STOP");
       server.send(200, "text/plain", "DHT acquisition stopped");
   });
 
   // Commandes contrôle bouton
-  server.on("/startButton", []() {
-      menu = MENU_BUTTON;
-      Serial.println(">>>WEB EVENT>>> Bouton START depuis le site");
-      server.send(200, "text/plain", "Button acquisition started");
-  });
+  // server.on("/startButton", []() {
+  //     menu = MENU_BUTTON;
+  //     Serial.println(">>>WEB EVENT>>> Bouton START depuis le site");
+  //     server.send(200, "text/plain", "Button acquisition started");
+  // });
 
-  server.on("/stopButton", []() {
-      menu = MENU_MAIN;
-      Serial.println(">>>WEB EVENT>>> Bouton STOP depuis le site");
-      server.send(200, "text/plain", "Button acquisition stopped");
-  });
+  // server.on("/stopButton", []() {
+  //     menu = MENU_MAIN;
+  //     Serial.println(">>>WEB EVENT>>> Bouton STOP depuis le site");
+  //     server.send(200, "text/plain", "Button acquisition stopped");
+  // });
 
   server.on("/dhtState", []() {
     String json = "{";
@@ -266,11 +282,11 @@ void showDHTMenu() {
 void showWifiMenu() {
   Serial.println("\n=== MENU WIFI ===");
   Serial.print("Mode actuel : ");
-  Serial.println(wifiMode == WIFI_MODE_AP ? "AP" : "STA");
+  Serial.println(wifiMode == WIFI_MODE_AP ? "AP" : "WS");
 
   Serial.println("Commandes disponibles :");
   Serial.println("       AP        : passer en Access Point");
-  Serial.println("       STA       : passer en Station");
+  Serial.println("       WS        : passer en Station");
   Serial.println("  RETURN ou MENU : retour au menu principal\n");
 }
 
@@ -298,8 +314,11 @@ void loop() {
     stringComplete = false;
   }
 
-  //Handle
+  //Handle du site web
   server.handleClient();
+
+  // Handle du MQTT
+  mqttClient.loop();
 }
 
 
@@ -346,6 +365,15 @@ void readDHT() {
     Serial.print(F("°C "));
     Serial.print(F("  Heat index: "));
     Serial.println(heatIndex);
+
+    // MQTT publication 
+    String payload = "{";
+    payload += "\"humidity\":" + String(humidity,1) + ",";
+    payload += "\"temperature\":" + String(temperature,1) + ",";
+    payload += "\"heatIndex\":" + String(heatIndex,1);
+    payload += "}";
+
+    mqttPublish(payload);
   }
 }
 
@@ -457,16 +485,16 @@ void parseCommand(String cmd) {
     if (cmd.equalsIgnoreCase("AP")) {
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
-      Serial.println("Mode AP activé.");
-      showWifiMenu();
+      //Serial.println("Mode AP activé.");
+      //showWifiMenu();
       return;
     }
 
-    if (cmd.equalsIgnoreCase("STA")) {
+    if (cmd.equalsIgnoreCase("WS")) {
       wifiMode = WIFI_MODE_WS;
       applyWifiMode();
       //Serial.println("Mode STA activé.");
-      showWifiMenu();
+      //showWifiMenu();
       return;
     }
 
@@ -482,6 +510,7 @@ void parseCommand(String cmd) {
    ======================================================================= */
 void applyWifiMode() {
 
+  // Mode AP
   if (wifiMode == WIFI_MODE_AP) {
     Serial.println("Basculer en mode ACCESS POINT...");
     
@@ -498,6 +527,7 @@ void applyWifiMode() {
     Serial.println(AP_myIP);
   }
 
+  // Mode WS (également appelé STA)
   if (wifiMode == WIFI_MODE_WS) {
 
     Serial.println("Basculer en mode STATION...");
@@ -509,7 +539,7 @@ void applyWifiMode() {
     WiFi.config(WS_local_IP, WS_gateway, WS_subnet);
     WiFi.begin(WS_ssid, WS_password);
 
-    Serial.print("Connexion au réseau STA...");
+    Serial.print("Connexion au réseau WS...");
 
     int timeout = 0;
     while (WiFi.status() != WL_CONNECTED && timeout < 50) {
@@ -523,15 +553,19 @@ void applyWifiMode() {
       WS_myIP = WiFi.localIP();
       Serial.print("Connecté ! IP : ");
       Serial.println(WS_myIP);
-    } 
+
+      //Connexion au MQTT lors de l'exécution de la connexion au réseau IIoT_A
+      if (mqttClient.state() != -2) {
+        connectMQTT();
+      } 
+    }
     else {
-      Serial.println("Échec de connexion STA, Retour mode AP");
+      Serial.println("Échec de connexion WS, Retour mode AP");
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
     }
   }
 }
-
 
 
 /* =======================================================================
@@ -542,6 +576,53 @@ void serialEvent() {
     char inChar = (char)Serial.read();
     inputString += inChar;
     if (inChar == '\n') stringComplete = true;
+  }
+}
+
+
+/* =======================================================================
+   Connexion au MQTT
+   ======================================================================= */
+void connectMQTT() {
+  if (wifiMode != WIFI_MODE_WS) {
+    Serial.println("MQTT désactivé (mode AP).");
+    return;
+  }
+
+  mqttClient.setServer(mqtt_server, 1883);
+
+  Serial.print("Connexion au serveur MQTT... ");
+
+  if (mqttClient.connect(clientID, mqtt_user, mqtt_pass)) {
+    Serial.println("OK !");
+  } else {
+    Serial.print("Échec, code = ");
+    Serial.println(mqttClient.state());
+  }
+}
+
+
+/* =======================================================================
+   Publication sur le MQTT
+   ======================================================================= */
+void mqttPublish(String payload) {
+  if (wifiMode != WIFI_MODE_WS) return;
+  
+  // Si le client n'est pas connecté, on gère la reconnexion
+  if (!mqttClient.connected()) {
+    long now = millis();
+    // On ne tente de se reconnecter que toutes les 5 secondes
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      // Tentative de reconnexion
+      connectMQTT(); 
+    }
+  }
+
+  // Si après la tentative (ou si on l'était déjà), on est connecté, on publie
+  if (mqttClient.connected()) {
+    mqttClient.publish(mqtt_topic, payload.c_str());
+    Serial.println("Envoi au MQTT " + payload);
   }
 }
 
