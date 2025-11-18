@@ -1,33 +1,3 @@
-/*********************************
-* Simple MQTT Publish Client 
-* With Serial link for output message
-* Blink Onboard Led on D4
-* Connect to WiFi hub and MQTT Broker.  
-*  
-* ATTENTION
-*  Make sure you change the XXX in the parameters
-*  
-* WiFi Hub :
-*    - ssid = "robotique";
-*    - password = "robotiqueS3";
-* The IP address of the ESP8266 module, will be 
-* printed to Serial when the module is connected. 
-*  
-* Station IP is 192.168.1.XXX
-*  
-* MQTT Broker Configuration
-*   mqtt_server => 192.168.1.2
-*   mqtt_topic => Test
-*   mqtt_username => usrX
-*   mqtt_password => usrX
-*   clientID => ESP8266_PubX
-*   
-* Message received = "M/n" => publish
-*   
-* Board : ESP-01    
-* Author : O. Patrouix ESTIA
-* Date : 30/11/2021
-*********************************/
 
 // constants won't change. Used here to 
 // set pin numbers:
@@ -39,9 +9,9 @@
 
 // WiFi
 // Make sure to update this for your own WiFi network!
-const char* ssid = "robotique";
-const char* password = "robotiqueS3";
-IPAddress local_IP(192,168,1,120);
+const char* ssid = "IIoT_A";
+const char* password = "IIoT_AS3";
+IPAddress local_IP(192,168,1,30);
 IPAddress gateway(192,168,1,12);
 IPAddress subnet(255,255,255,0);
 IPAddress myIP;
@@ -50,8 +20,8 @@ IPAddress myIP;
 // Make sure to update this for your own MQTT Broker!
 const char* mqtt_server = "192.168.1.2";
 const char* mqtt_topic = "TestSerial";
-const char* mqtt_username = "usr0";
-const char* mqtt_password = "usr0";
+const char* mqtt_username = "usrThi";
+const char* mqtt_password = "usrThi";
 // The client id identifies the ESP8266 device. Think of it a bit like a hostname (Or just a name, like Greg).
 const char* clientID = "ESP8266_Pub0";
 
@@ -71,34 +41,6 @@ boolean cmd = false; // whether the MQTT Message
 // Initialise the WiFi and MQTT Client objects
 WiFiClient wifiClient;
 PubSubClient client(mqtt_server, 1883, wifiClient); // 1883 is the listener port for the Broker
-
-// Blink Led on GPIO_X
-// 50% duty cycle intervalMillis is 1/2 period
-// Parameters : Pin | pointer to StateGPIO | pointer to PreviousMillis
-void BlinkLed(int GPIO, int *StateGPIO, long *previousMillis, long intervalMillis){
-  // check to see if it's time to blink the LED; that is, if the 
-  // difference between the current time and last time you blinked 
-  // the LED is bigger than the interval at which you want to 
-  // blink the LED.
-  unsigned long currentMillis = millis();
- 
-  if(currentMillis - *previousMillis > intervalMillis) {
-    // save the last time you blinked the LED 
-    *previousMillis = currentMillis;   
-
-    // if the LED is off turn it on and vice-versa:
-    if (*StateGPIO == HIGH)
-    {
-      *StateGPIO = LOW;
-    }
-    else
-    {
-      *StateGPIO = HIGH;
-    }
-    // set the LED with the ledState of the variable:
-    digitalWrite(GPIO, *StateGPIO);
-  }
-}
 
 void setup() {
   // initialize digital esp8266 D4 as an output.
@@ -150,7 +92,7 @@ void loop() {
   // here is where you'd put code that needs to be running all the time.
   
   // Blink Led still alive
-  BlinkLed(D4, &StateD4, &previousMillis_D4, intervalMillis/2);
+  //BlinkLed(D4, &StateD4, &previousMillis_D4, intervalMillis/2);
 
   // Check if Data available on Serial and merge them into inputString
   serialEvent();
