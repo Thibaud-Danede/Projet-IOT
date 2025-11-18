@@ -163,7 +163,6 @@ void setup() {
 
 
   // -------- WEB HANDLERS --------
-
   // Page principale HTML
   server.on("/", []() {
       Serial.println(">>>WEB EVENT>>> Appel de l'index du site");
@@ -457,8 +456,8 @@ void parseCommand(String cmd) {
     if (cmd.equalsIgnoreCase("AP")) {
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
-      Serial.println("Mode AP activé.");
-      showWifiMenu();
+      //Serial.println("Mode AP activé.");
+      //showWifiMenu();
       return;
     }
 
@@ -466,7 +465,7 @@ void parseCommand(String cmd) {
       wifiMode = WIFI_MODE_WS;
       applyWifiMode();
       //Serial.println("Mode STA activé.");
-      showWifiMenu();
+      //showWifiMenu();
       return;
     }
 
