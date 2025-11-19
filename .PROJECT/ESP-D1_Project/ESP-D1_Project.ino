@@ -344,26 +344,6 @@ void stillAlive() {
 
 
 /* =======================================================================
-   Fonction lecture bouton
-   ======================================================================= */
-// void readButton() {
-//   int state = digitalRead(BUTTON_PIN);
-
-//   if (state == LOW) {
-//     buttonState = LOW;
-//     ledState = LOW;
-//   } else {
-//     buttonState = HIGH;
-//     ledState = HIGH;
-//   }
-
-//   digitalWrite(LED_PIN, ledState);
-
-//   Serial.print("Bouton pressé : ");
-//   Serial.println(buttonState);
-// }
-
-/* =======================================================================
    Fonction lecture dht
    ======================================================================= */
 void readDHT() {
@@ -403,11 +383,6 @@ void parseCommand(String cmd) {
 
   /* --- COMMANDE MENU PRINCIPAL --- */
   if (menu == MENU_MAIN) {
-    // if (cmd == "1") {
-    //   menu = MENU_BUTTON;
-    //   showButtonMenu();
-    //   return;
-    // }
     if (cmd == "1") {
       //Serial.println("Option 2 non encore implémentée.");
       menu = MENU_DHT;
@@ -423,40 +398,6 @@ void parseCommand(String cmd) {
     showMainMenu();
     return;
   }
-
-
-  /* === COMMANDE MENU BOUTON === */
-  // if (menu == MENU_BUTTON) {
-
-  //   // Retour au menu principal
-  //   if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
-  //   menu = MENU_MAIN;
-  //   showMainMenu();
-  //   return;
-  //   }
-
-
-  //   // BUTTONSET <ms>
-  //   if (cmd.startsWith("BUTTONSET")) {
-
-  //     String valueStr = cmd.substring(9);
-  //     valueStr.trim();
-  //     long newInterval = valueStr.toInt();
-
-  //     if (newInterval > 0) {
-  //       buttonInterval = newInterval;
-  //       Serial.print("Nouvel intervalle = ");
-  //       Serial.print(buttonInterval);
-  //       Serial.println(" ms");
-  //     } else {
-  //       Serial.println("Erreur: donnée non valide.");
-  //     }
-  //     return;
-  //   }
-  //   //Réponse à l'ereur
-  //   Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
-  //   return;
-  // }
 
     /* === COMMANDE MENU DHT === */
   if (menu == MENU_DHT) {
