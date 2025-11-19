@@ -101,7 +101,6 @@ const long reconnectInterval = 30000;
 bool autoReconnectEnabled = true;  
 
 
-
 /* ---------------- STILL ALIVE ---------------- */
 long previousMillisAlive = 0;
 long aliveInterval = 1000;   // par défaut AP
@@ -152,10 +151,7 @@ void setup() {
   applyWifiMode();   // démarre AP/WS/KO correctement
 
 
-  /* ================================
-         WEB HANDLERS (SITE)
-     ================================ */
-
+  /* -------------- WEB HANDLERS -------------- */
   /* --- Page principale HTML --- */
   server.on("/", []() {
       Serial.println(">>>WEB EVENT>>> Appel de l'index du site");
@@ -169,10 +165,7 @@ void setup() {
   });
 
 
-  /* =====================================
-          HANDLERS DHT (SITE)
-     ===================================== */
-
+  /* -------------- HANDLERS DHT -------------- */
   server.on("/startDHT", []() {
       menu = MENU_DHT;
       Serial.println(">>>WEB EVENT>>> DHT START depuis le site");
@@ -220,10 +213,7 @@ void setup() {
   });
 
 
-  /* =====================================
-            HANDLERS WIFI (SITE)
-     ===================================== */
-
+  /* -------------- HANDLES WIFI -------------- */
   // JSON du statut WiFi
   server.on("/wifiState", []() {
       String json = "{";
@@ -239,7 +229,7 @@ void setup() {
   });
 
 
-  /* --- Passage AP --- */
+  // Passage AP
   server.on("/wifiAP", []() {
       Serial.println(">>>WEB EVENT>>> Passage en mode AP depuis le site");
       wifiMode = WIFI_MODE_AP;
@@ -247,7 +237,7 @@ void setup() {
       server.send(200, "text/plain", "OK");
   });
 
-  /* --- Passage WS --- */
+  // Passage WS
   server.on("/wifiWS", []() {
       Serial.println(">>>WEB EVENT>>> Passage en mode WS depuis le site");
       wifiMode = WIFI_MODE_WS;
@@ -255,7 +245,7 @@ void setup() {
       server.send(200, "text/plain", "OK");
   });
 
-  /* --- Passage KO --- */
+  // Passage KO
   server.on("/wifiKO", []() {
       Serial.println(">>>WEB EVENT>>> Passage en mode KO depuis le site");
       wifiMode = WIFI_MODE_KO;
@@ -263,7 +253,7 @@ void setup() {
       server.send(200, "text/plain", "OK");
   });
 
-  /* --- Toggle AUTO RECO --- */
+  // Toggle Auto Reco
   server.on("/wifiRecoToggle", []() {
       autoReconnectEnabled = !autoReconnectEnabled;
       Serial.print(">>>WEB EVENT>>> RECO TOGGLE : ");
@@ -272,9 +262,7 @@ void setup() {
   });
 
 
-  /* ================================
-            DÉMARRAGE SERVEUR
-     ================================ */
+  /* ------------ Démarrage Wifi ------------ */
 
   server.begin();
   Serial.println("HTTP server started");
@@ -514,10 +502,10 @@ void applyWifiMode() {
       return;
     }
 
-    // ---- ÉCHEC WS → AP ----
+    // ---- ÉCHEC WS vers AP ----
     Serial.println("[WiFi] Echec WS → bascule en AP...");
     wifiMode = WIFI_MODE_AP;
-    applyWifiMode();   // OK ici car simple bascule WS→AP
+    applyWifiMode();  
     return;
   }
 
@@ -527,8 +515,6 @@ void applyWifiMode() {
 
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-
-    // autoReconnectWS() prendra le relais pour tenter WS puis AP
     return;
   }
 }
