@@ -50,7 +50,7 @@ IPAddress WS_myIP;
 
 /* ---------------- PINS ---------------- */
 const int LED_PIN = D5;
-const int BUTTON_PIN = D7;
+//const int BUTTON_PIN = D7;
 const int DHT_PIN = D4;
 // GPIO à modifier plus tard pour la partie web
 const int WEB0 =  GPIO_0;      
@@ -58,7 +58,7 @@ const int WEB2 =  GPIO_2;
 
 
 /* ---------------- ETATS ---------------- */
-int buttonState = LOW;
+//int buttonState = LOW;
 int ledState = LOW;
 int dhtState = LOW;
 // Variables web (changer le nom GPIO)
@@ -67,7 +67,8 @@ int StateWEB2 = LOW;
 // Etats Wifi
 enum WifiModeState { 
   WIFI_MODE_AP, 
-  WIFI_MODE_WS 
+  WIFI_MODE_WS,
+  WIFI_MODE_KO 
 };
 WifiModeState wifiMode = WIFI_MODE_AP;   // démarrage par défaut en AP
        
@@ -81,14 +82,25 @@ float heatIndex;
 DHT dht(DHT_PIN, DHTTYPE);
 
 /* ---------------- TIMERS ---------------- */
-long previousMillisBtn = 0;
+//long previousMillisBtn = 0;
 long previousMillisDHT = 0;
-long buttonInterval = 500;
+//long buttonInterval = 500;
 long dhtInterval = 500;
 // Timer web changer le nom plus tard
 long previousMillis_2 = 0; 
 // Contrôle etat MQTT
 long lastReconnectAttempt = 0;
+
+
+/* ---------------- STILL ALIVE ---------------- */
+long previousMillisAlive = 0;
+long aliveInterval = 1000;   // par défaut AP
+
+// Intervalles de clignotement selon le mode
+const long aliveIntervalAP  = 400;   // mode AP  -> clignotement moyen
+const long aliveIntervalWS  = 1000;  // mode WS  -> clignotement lent
+const long aliveIntervalSER = 150;   // mode "sécurité" éventuel (on l’utilisera plus tard)
+
 
 /* ---------------- SERIAL ---------------- */
 String inputString = "";
@@ -97,7 +109,6 @@ bool stringComplete = false;
 /* ---------------- MENU ---------------- */
 enum MenuState {
   MENU_MAIN,
-  MENU_BUTTON,
   MENU_DHT,
   MENU_WIFI
 };
@@ -106,7 +117,7 @@ MenuState menu = MENU_MAIN;
 
 /* ---------------- CONFIG MQTT ---------------- */
 const char* mqtt_server = "192.168.1.2";
-const char* mqtt_topic  = "IIoT_DHT";
+const char* mqtt_topic  = "Greg";
 const char* mqtt_user   = "usr10";
 const char* mqtt_pass   = "usr10";
 const char* clientID    = "Greg";
@@ -118,19 +129,17 @@ PubSubClient mqttClient(wifiClient);
 /* =======================================================================
    WEB HANDLES
    ======================================================================= */
-// To Do on http://192.168.4.XX/
-// Set WEB0 to HIGH <=> relay opened
+
 void handleRoot() {
-  //server.send(200, "text/html", "<h1>You are connected</h1>");
+
   server.send(200, "text/html", getPage());
   digitalWrite(WEB0, HIGH);
 }
-// To Do on http://192.168.4.XX/open
-// Set WEB0 to LOW for 500ms <=> relay closed
+
 void handleOpen() {
-  //server.send(200, "text/html", "<h1>Gate Opening</h1>");
+
   server.send(200, "text/html", getPage());
-  // set the LED with the ledState of the variable:
+
   StateWEB0 = LOW;
   digitalWrite(WEB0, StateWEB0);
   delay(500);
@@ -138,12 +147,10 @@ void handleOpen() {
   digitalWrite(WEB0, StateWEB0);
 }
 
-// To Do on http://192.168.4.XX/close
-// Set WEB0 to LOW for 500ms <=> relay closed
 void handleClose() {
-  //server.send(200, "text/html", "<h1>Gate Closing</h1>");
+
   server.send(200, "text/html", getPage());
-  // set the LED with the ledState of the variable:
+
   StateWEB0 = LOW;
   digitalWrite(WEB0, StateWEB0);
   delay(500);
@@ -159,7 +166,6 @@ void setup() {
   digitalWrite(LED_PIN, ledState);
 
   dht.begin();
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
   delay(300);
@@ -167,11 +173,10 @@ void setup() {
 
   showMainMenu();
 
-  pinMode(WEB0, OUTPUT);
-  digitalWrite(WEB0, HIGH);
+    // LED "Still Alive"
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
-  pinMode(WEB2, OUTPUT);
-  digitalWrite(WEB2, LOW);
 
   // -------- WIFI MANAGEMENT --------
   applyWifiMode();
@@ -203,19 +208,6 @@ void setup() {
       mqttPublish("DHT STOP");
       server.send(200, "text/plain", "DHT acquisition stopped");
   });
-
-  // Commandes contrôle bouton
-  // server.on("/startButton", []() {
-  //     menu = MENU_BUTTON;
-  //     Serial.println(">>>WEB EVENT>>> Bouton START depuis le site");
-  //     server.send(200, "text/plain", "Button acquisition started");
-  // });
-
-  // server.on("/stopButton", []() {
-  //     menu = MENU_MAIN;
-  //     Serial.println(">>>WEB EVENT>>> Bouton STOP depuis le site");
-  //     server.send(200, "text/plain", "Button acquisition stopped");
-  // });
 
   server.on("/dhtState", []() {
     String json = "{";
@@ -258,9 +250,9 @@ void setup() {
 void showMainMenu() {
   Serial.println("\n======== MENU PRINCIPAL ========");
   Serial.println("Tapez dans l'invite de commande le numéro du paramètre que vous voulez régler");
-  Serial.println("1 : Vidualiser et Gérer l'acquisition du bouton");
-  Serial.println("2 : Visualiser et Gérer l'acquisition du dht");
-  Serial.println("3 : Visualiser et Gérer l'accès wifi");
+  Serial.println("1 : Visualiser et gérer l’acquisition du DHT");
+  Serial.println("2 : Visualiser et gérer l’accès WiFi");
+
 }
 
 void showButtonMenu() {
@@ -296,15 +288,14 @@ void showWifiMenu() {
    LOOP
    ======================================================================= */
 void loop() {
-
-  // Lecture bouton seulement dans le menu bouton
-  if (menu == MENU_BUTTON) {
-    doEvery(buttonInterval, &previousMillisBtn, readButton);
-  }
-
   if (menu == MENU_DHT) {
     doEvery(dhtInterval, &previousMillisDHT, readDHT);
   }
+
+  
+  // Still Alive (clignotement selon le mode WiFi)
+  doEvery(getAliveInterval(), &previousMillisAlive, stillAlive);
+  
   // Lecture série
   serialEvent();
 
@@ -323,24 +314,34 @@ void loop() {
 
 
 /* =======================================================================
-   Fonction lecture bouton
+   Fonctions Still Alive
    ======================================================================= */
-void readButton() {
-  int state = digitalRead(BUTTON_PIN);
+long getAliveInterval() {
 
-  if (state == LOW) {
-    buttonState = LOW;
-    ledState = LOW;
-  } else {
-    buttonState = HIGH;
-    ledState = HIGH;
+  if (wifiMode == WIFI_MODE_WS) {
+    // Mode Station : vérifier si réellement connecté
+    if (WiFi.status() == WL_CONNECTED)
+      return 3000;  // connecté WS
+    else
+      return 100;   // WS demandé mais pas connecté
   }
 
-  digitalWrite(LED_PIN, ledState);
+  if (wifiMode == WIFI_MODE_AP) {
+    // Mode AP : toujours ok
+    return 1000;
+  }
 
-  Serial.print("Bouton pressé : ");
-  Serial.println(buttonState);
+  // fallback sécurité
+  return 100;
 }
+
+void stillAlive() {
+  static bool led = false;
+
+  led = !led;
+  digitalWrite(LED_PIN, led ? HIGH : LOW);
+}
+
 
 /* =======================================================================
    Fonction lecture dht
@@ -367,12 +368,7 @@ void readDHT() {
     Serial.println(heatIndex);
 
     // MQTT publication 
-    String payload = "{";
-    payload += "\"humidity\":" + String(humidity,1) + ",";
-    payload += "\"temperature\":" + String(temperature,1) + ",";
-    payload += "\"heatIndex\":" + String(heatIndex,1);
-    payload += "}";
-
+    String payload = "{\"humidity\":" + String(humidity,1) + ",\"temperature\":" + String(temperature,1) + ",\"heatIndex\":" + String(heatIndex,1) + ",\"signature\":\"Thibaud\"}";
     mqttPublish(payload);
   }
 }
@@ -388,57 +384,18 @@ void parseCommand(String cmd) {
   /* --- COMMANDE MENU PRINCIPAL --- */
   if (menu == MENU_MAIN) {
     if (cmd == "1") {
-      menu = MENU_BUTTON;
-      showButtonMenu();
-      return;
-    }
-    if (cmd == "2") {
       //Serial.println("Option 2 non encore implémentée.");
       menu = MENU_DHT;
       showDHTMenu();
       return;
     }
-    if (cmd == "3") {
+    if (cmd == "2") {
       menu = MENU_WIFI;
       showWifiMenu();
       return;
     }
     Serial.println("Commande inconnue.");
     showMainMenu();
-    return;
-  }
-
-
-  /* === COMMANDE MENU BOUTON === */
-  if (menu == MENU_BUTTON) {
-
-    // Retour au menu principal
-    if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
-    menu = MENU_MAIN;
-    showMainMenu();
-    return;
-    }
-
-
-    // BUTTONSET <ms>
-    if (cmd.startsWith("BUTTONSET")) {
-
-      String valueStr = cmd.substring(9);
-      valueStr.trim();
-      long newInterval = valueStr.toInt();
-
-      if (newInterval > 0) {
-        buttonInterval = newInterval;
-        Serial.print("Nouvel intervalle = ");
-        Serial.print(buttonInterval);
-        Serial.println(" ms");
-      } else {
-        Serial.println("Erreur: donnée non valide.");
-      }
-      return;
-    }
-    //Réponse à l'ereur
-    Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
     return;
   }
 
@@ -485,17 +442,19 @@ void parseCommand(String cmd) {
     if (cmd.equalsIgnoreCase("AP")) {
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
-      //Serial.println("Mode AP activé.");
-      //showWifiMenu();
       return;
     }
 
     if (cmd.equalsIgnoreCase("WS")) {
       wifiMode = WIFI_MODE_WS;
       applyWifiMode();
-      //Serial.println("Mode STA activé.");
-      //showWifiMenu();
       return;
+    }
+
+    if (cmd.equalsIgnoreCase("KILL")) {
+      wifiMode = WIFI_MODE_KO;
+      Serial.println("Mode WiFi mis en carafe !");
+    return;
     }
 
     Serial.println("Commande inconnue.");
@@ -565,6 +524,13 @@ void applyWifiMode() {
       applyWifiMode();
     }
   }
+  // Mode KO
+  if (wifiMode == WIFI_MODE_KO) {
+    Serial.println("WiFi volontairement en carafe. Aucun WiFi actif.");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return;
+  }
 }
 
 
@@ -595,6 +561,11 @@ void connectMQTT() {
 
   if (mqttClient.connect(clientID, mqtt_user, mqtt_pass)) {
     Serial.println("OK !");
+    Serial.print("Connecté au Topic ");
+    Serial.print(mqtt_topic);
+    Serial.print(" en tant que ");
+    Serial.println(mqtt_user);
+
   } else {
     Serial.print("Échec, code = ");
     Serial.println(mqttClient.state());
