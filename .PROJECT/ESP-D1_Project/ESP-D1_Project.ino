@@ -1,11 +1,11 @@
 /*********************************
-* Simple led blinking 
+* Full IIoT programm
+* Publisher Role
 * With Serial link at 115200 bauds
-* Blink Onboard Led on D4
-* Push Button on D7 (PullUp) => scrutation
 * Board : ESP-D1  
-* Author : O. Patrouix ESTIA
-* Date : 29/09/2021
+* Original Author : O. Patrouix ESTIA
+* Student : Thiabud DANEDE
+* Date : 19/11/2025
 *********************************/
 
 /* =======================================================================
@@ -47,6 +47,13 @@ IPAddress WS_gateway(192,168,1,12);
 IPAddress WS_subnet(255,255,255,0);
 IPAddress WS_myIP;
 
+/* ---------------- CONFIG MQTT ---------------- */
+const char* mqtt_server = "192.168.1.2";
+const char* mqtt_topic  = "Greg";
+const char* mqtt_user   = "usr10";
+const char* mqtt_pass   = "usr10";
+const char* clientID    = "Greg";
+
 
 /* ---------------- PINS ---------------- */
 const int LED_PIN = D5;
@@ -65,12 +72,7 @@ int dhtState = LOW;
 int StateWEB0 = HIGH;           
 int StateWEB2 = LOW;     
 // Etats Wifi
-enum WifiModeState { 
-  WIFI_MODE_AP, 
-  WIFI_MODE_WS,
-  WIFI_MODE_KO 
-};
-WifiModeState wifiMode = WIFI_MODE_AP;   // démarrage par défaut en AP
+WifiModeState wifiMode = WIFI_MODE_WS;   // démarrage par défaut en AP
        
 
 /* ------------- VARIABLES DHT ------------- */
@@ -81,6 +83,7 @@ float heatIndex;
 /* ------ INTITIALISATION DHT SENSOR ------ */
 DHT dht(DHT_PIN, DHTTYPE);
 
+
 /* ---------------- TIMERS ---------------- */
 //long previousMillisBtn = 0;
 long previousMillisDHT = 0;
@@ -90,6 +93,13 @@ long dhtInterval = 500;
 long previousMillis_2 = 0; 
 // Contrôle etat MQTT
 long lastReconnectAttempt = 0;
+// Dernière tentative de reconnection
+long previousReconnectAttempt = 0;
+// Intervalle de tentative de reconnection
+const long reconnectInterval = 30000; 
+// Toggle de la reconnexion automatique
+bool autoReconnectEnabled = true;  
+
 
 
 /* ---------------- STILL ALIVE ---------------- */
@@ -97,9 +107,9 @@ long previousMillisAlive = 0;
 long aliveInterval = 1000;   // par défaut AP
 
 // Intervalles de clignotement selon le mode
-const long aliveIntervalAP  = 400;   // mode AP  -> clignotement moyen
-const long aliveIntervalWS  = 1000;  // mode WS  -> clignotement lent
-const long aliveIntervalSER = 150;   // mode "sécurité" éventuel (on l’utilisera plus tard)
+const long aliveIntervalAP  = 400;   
+const long aliveIntervalWS  = 1000;  
+const long aliveIntervalSER = 150;  
 
 
 /* ---------------- SERIAL ---------------- */
@@ -115,70 +125,30 @@ enum MenuState {
 
 MenuState menu = MENU_MAIN;
 
-/* ---------------- CONFIG MQTT ---------------- */
-const char* mqtt_server = "192.168.1.2";
-const char* mqtt_topic  = "Greg";
-const char* mqtt_user   = "usr10";
-const char* mqtt_pass   = "usr10";
-const char* clientID    = "Greg";
-
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
 
 /* =======================================================================
-   WEB HANDLES
-   ======================================================================= */
-
-void handleRoot() {
-
-  server.send(200, "text/html", getPage());
-  digitalWrite(WEB0, HIGH);
-}
-
-void handleOpen() {
-
-  server.send(200, "text/html", getPage());
-
-  StateWEB0 = LOW;
-  digitalWrite(WEB0, StateWEB0);
-  delay(500);
-  StateWEB0 = HIGH;
-  digitalWrite(WEB0, StateWEB0);
-}
-
-void handleClose() {
-
-  server.send(200, "text/html", getPage());
-
-  StateWEB0 = LOW;
-  digitalWrite(WEB0, StateWEB0);
-  delay(500);
-  StateWEB0 = HIGH;
-  digitalWrite(WEB0, StateWEB0);
-}
-
-/* =======================================================================
    SETUP
    ======================================================================= */
 void setup() {
+  // Affectation de la led
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
 
+  // Lancement du capteur
   dht.begin();
 
+  // Activation du moniteur série
   Serial.begin(115200);
   delay(300);
   Serial.println("\nBOOT ESP-D1 ready to work");
 
+  // Affichage du menu
   showMainMenu();
 
-    // LED "Still Alive"
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-
-
-  // -------- WIFI MANAGEMENT --------
+  // Application du mode wifi
   applyWifiMode();
 
 
@@ -243,56 +213,21 @@ void setup() {
 }
 
 
-
-/* =======================================================================
-   MENU AFFICHAGE
-   ======================================================================= */
-void showMainMenu() {
-  Serial.println("\n======== MENU PRINCIPAL ========");
-  Serial.println("Tapez dans l'invite de commande le numéro du paramètre que vous voulez régler");
-  Serial.println("1 : Visualiser et gérer l’acquisition du DHT");
-  Serial.println("2 : Visualiser et gérer l’accès WiFi");
-
-}
-
-void showButtonMenu() {
-  Serial.println("\n=== MENU BOUTON ===");
-  Serial.println("Affichage des valeurs du bouton...");
-  Serial.println("Commandes disponibles :");
-  Serial.println("  BUTTONSET <ms>   : changer intervalle lecture");
-  Serial.println("  RETURN ou MENU   : retour au menu principal\n");
-}
-
-void showDHTMenu() {
-  Serial.println("\n=== MENU DHT ===");
-  Serial.println("Affichage des valeurs du dht...");
-  Serial.println("Commandes disponibles :");
-  Serial.println("  DHTSET <ms>     : changer intervalle lecture");
-  Serial.println("  RETURN ou MENU  : retour au menu principal\n");
-}
-
-void showWifiMenu() {
-  Serial.println("\n=== MENU WIFI ===");
-  Serial.print("Mode actuel : ");
-  Serial.println(wifiMode == WIFI_MODE_AP ? "AP" : "WS");
-
-  Serial.println("Commandes disponibles :");
-  Serial.println("       AP        : passer en Access Point");
-  Serial.println("       WS        : passer en Station");
-  Serial.println("  RETURN ou MENU : retour au menu principal\n");
-}
-
-
-
 /* =======================================================================
    LOOP
    ======================================================================= */
 void loop() {
+
+  // Détection immédiate de perte WS
+  if (wifiMode == WIFI_MODE_WS && WiFi.status() != WL_CONNECTED) {
+      Serial.println("[WiFi] Perte WS détectée → bascule en AP");
+      wifiMode = WIFI_MODE_AP;
+      applyWifiMode();
+  }
+
   if (menu == MENU_DHT) {
     doEvery(dhtInterval, &previousMillisDHT, readDHT);
   }
-
-  
   // Still Alive (clignotement selon le mode WiFi)
   doEvery(getAliveInterval(), &previousMillisAlive, stillAlive);
   
@@ -305,6 +240,11 @@ void loop() {
     stringComplete = false;
   }
 
+  // Verification continue de l'état de l'AP
+  checkAP();
+  // Tentative de reconnection périodique (30 secondes contrôlées par reconnectInterval)
+  autoReconnectWS();
+
   //Handle du site web
   server.handleClient();
 
@@ -316,10 +256,11 @@ void loop() {
 /* =======================================================================
    Fonctions Still Alive
    ======================================================================= */
+// Acquisition de l'intervale à laquelle clignoter
 long getAliveInterval() {
 
   if (wifiMode == WIFI_MODE_WS) {
-    // Mode Station : vérifier si réellement connecté
+    // Mode Station pour vérifier si réellement connecté
     if (WiFi.status() == WL_CONNECTED)
       return 3000;  // connecté WS
     else
@@ -327,50 +268,17 @@ long getAliveInterval() {
   }
 
   if (wifiMode == WIFI_MODE_AP) {
-    // Mode AP : toujours ok
     return 1000;
   }
-
-  // fallback sécurité
   return 100;
 }
 
+// Appel du clignotement de la led en fonction de l'état du système
 void stillAlive() {
   static bool led = false;
-
+  // Contrôle du changement d'état de la led
   led = !led;
   digitalWrite(LED_PIN, led ? HIGH : LOW);
-}
-
-
-/* =======================================================================
-   Fonction lecture dht
-   ======================================================================= */
-void readDHT() {
-
-  humidity = dht.readHumidity();
-
-  temperature = dht.readTemperature();
-
-  if (isnan(humidity) || isnan(temperature)) {
-    Serial.println(F("Failed to read from DHT sensor!"));
-  }
-  else {
-    // Compute heat index in Celsius (isFahreheit = false)
-    heatIndex = dht.computeHeatIndex(temperature, humidity, false);
-  
-    Serial.print(F("Humidity: "));
-    Serial.print(humidity);
-    Serial.print(F("%  Temperature: "));
-    Serial.print(temperature);
-    Serial.print(F("°C "));
-    Serial.print(F("  Heat index: "));
-    Serial.println(heatIndex);
-
-    // MQTT publication 
-    String payload = "{\"humidity\":" + String(humidity,1) + ",\"temperature\":" + String(temperature,1) + ",\"heatIndex\":" + String(heatIndex,1) + ",\"signature\":\"Thibaud\"}";
-    mqttPublish(payload);
-  }
 }
 
 
@@ -383,12 +291,13 @@ void parseCommand(String cmd) {
 
   /* --- COMMANDE MENU PRINCIPAL --- */
   if (menu == MENU_MAIN) {
+    // Lance le défilé du DHT
     if (cmd == "1") {
-      //Serial.println("Option 2 non encore implémentée.");
       menu = MENU_DHT;
       showDHTMenu();
       return;
     }
+    // Affiche le menu WiFi
     if (cmd == "2") {
       menu = MENU_WIFI;
       showWifiMenu();
@@ -399,9 +308,8 @@ void parseCommand(String cmd) {
     return;
   }
 
-    /* === COMMANDE MENU DHT === */
+  /* --- COMMANDE MENU DHT --- */
   if (menu == MENU_DHT) {
-
     // Retour au menu principal
     if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
     menu = MENU_MAIN;
@@ -409,13 +317,13 @@ void parseCommand(String cmd) {
     return;
     }
 
-    // DHTSET <ms>
+    // DHTSET <ms>, l'utilisateur entre à côté de DHTSET sa nouvelle intervalle
     if (cmd.startsWith("DHTSET")) {
-
       String valueStr = cmd.substring(6);
       valueStr.trim();
       long newInterval = valueStr.toInt();
 
+      // Valide seulement si la requête est > 0
       if (newInterval > 0) {
         dhtInterval = newInterval;
         Serial.print("Nouvel intervalle = ");
@@ -427,34 +335,43 @@ void parseCommand(String cmd) {
       return;
     }
     //Réponse à l'ereur
-    Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
+    Serial.println("Commande inconnue. Tapez RETURN ou MENU pour revenir au menu principal.");
     return;
   }
   /* === COMMANDE MENU WIFI === */
   if (menu == MENU_WIFI) {
-
+    // Commande de retour au menu
     if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
       menu = MENU_MAIN;
       showMainMenu();
       return;
     }
-
+    //Lance l'état Access Point
     if (cmd.equalsIgnoreCase("AP")) {
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
       return;
     }
-
+    // Lance l'état Work Station
     if (cmd.equalsIgnoreCase("WS")) {
       wifiMode = WIFI_MODE_WS;
       applyWifiMode();
       return;
     }
-
+    // Force l'état KO
     if (cmd.equalsIgnoreCase("KILL")) {
       wifiMode = WIFI_MODE_KO;
       Serial.println("Mode WiFi mis en carafe !");
+      applyWifiMode();
     return;
+    }
+
+    // Toggle de la reconnexion automatique
+    if (cmd.equalsIgnoreCase("RECO")) {
+      autoReconnectEnabled = !autoReconnectEnabled;  // TOGGLE
+      Serial.print("Reconnexion automatique : ");
+      Serial.println(autoReconnectEnabled ? "ACTIVÉE" : "DÉSACTIVÉE");
+      return;
     }
 
     Serial.println("Commande inconnue.");
@@ -464,32 +381,41 @@ void parseCommand(String cmd) {
 
 }
 
+
 /* =======================================================================
    Wifi mode State
    ======================================================================= */
 void applyWifiMode() {
 
-  // Mode AP
+  /* --- Mode AP --- */
   if (wifiMode == WIFI_MODE_AP) {
-    Serial.println("Basculer en mode ACCESS POINT...");
-    
+    Serial.println("\n[WiFi] Passage en mode ACCESS POINT...");
+
     WiFi.disconnect(true);
     delay(200);
 
     WiFi.mode(WIFI_AP);
+
+    bool apOK = WiFi.softAP(AP_ssid, AP_password);
     WiFi.softAPConfig(local_IP, gateway, subnet);
-    WiFi.softAP(AP_ssid, AP_password);
 
     AP_myIP = WiFi.softAPIP();
 
-    Serial.print("AP IP address: ");
+    if (!apOK || AP_myIP.toString() == "0.0.0.0") {
+      Serial.println("[WiFi] ERREUR : Impossible de demarrer AP !");
+      Serial.println("[WiFi] Passage en mode KO (fallback)...");
+      wifiMode = WIFI_MODE_KO;
+      return;  // PAS de recursion — autoReconnectWS() gérera la suite
+    }
+
+    Serial.print("[WiFi] AP actif, IP = ");
     Serial.println(AP_myIP);
+    return;
   }
 
-  // Mode WS (également appelé STA)
+  /* --- Mode AP --- */
   if (wifiMode == WIFI_MODE_WS) {
-
-    Serial.println("Basculer en mode STATION...");
+    Serial.println("\n[WiFi] Passage en mode STATION...");
 
     WiFi.disconnect(true);
     delay(200);
@@ -498,7 +424,7 @@ void applyWifiMode() {
     WiFi.config(WS_local_IP, WS_gateway, WS_subnet);
     WiFi.begin(WS_ssid, WS_password);
 
-    Serial.print("Connexion au réseau WS...");
+    Serial.print("[WiFi] Connexion au réseau WS...");
 
     int timeout = 0;
     while (WiFi.status() != WL_CONNECTED && timeout < 50) {
@@ -509,27 +435,102 @@ void applyWifiMode() {
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
+
       WS_myIP = WiFi.localIP();
-      Serial.print("Connecté ! IP : ");
+      Serial.print("[WiFi] Connecté ! IP = ");
       Serial.println(WS_myIP);
 
-      //Connexion au MQTT lors de l'exécution de la connexion au réseau IIoT_A
-      if (mqttClient.state() != -2) {
-        connectMQTT();
-      } 
+      // Connexion MQTT
+      connectMQTT();
+      return;
     }
-    else {
-      Serial.println("Échec de connexion WS, Retour mode AP");
-      wifiMode = WIFI_MODE_AP;
-      applyWifiMode();
-    }
+
+    // ---- ÉCHEC WS → AP ----
+    Serial.println("[WiFi] Echec WS → bascule en AP...");
+    wifiMode = WIFI_MODE_AP;
+    applyWifiMode();   // OK ici car simple bascule WS→AP
+    return;
   }
+
   // Mode KO
   if (wifiMode == WIFI_MODE_KO) {
-    Serial.println("WiFi volontairement en carafe. Aucun WiFi actif.");
+    Serial.println("\n[WiFi] Mode KO : aucun WiFi actif.");
+
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
+
+    // autoReconnectWS() prendra le relais pour tenter WS puis AP
     return;
+  }
+}
+
+
+/* =======================================================================
+   Vérification continuelle de l'AP
+   ======================================================================= */
+void checkAP() {
+  if (wifiMode == WIFI_MODE_AP) {
+
+    if (WiFi.softAPIP().toString() == "0.0.0.0") {
+      Serial.println("Wifi AP perdu ! Redémarrage du mode AP...");
+      wifiMode = WIFI_MODE_AP;   
+      applyWifiMode();          
+    }
+  }
+}
+
+
+/* =======================================================================
+   Tentatives de reconnection automatique
+   ======================================================================= */
+void autoReconnectWS() {
+  // Si RECO = OFF, pas de reconnection automatique
+  if (!autoReconnectEnabled) 
+    return;
+  // Si déjà en WS, pas de reconnection automatique
+  if (wifiMode == WIFI_MODE_WS)
+    return; 
+
+  unsigned long now = millis();
+
+  // Tenter seulement toutes les X secondes
+  if (now - previousReconnectAttempt < reconnectInterval)
+    return;
+
+  previousReconnectAttempt = now;
+
+  Serial.println("\n[Auto] Tentative de reconnection au WS...");
+
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_STA);
+
+  WiFi.config(WS_local_IP, WS_gateway, WS_subnet);
+
+  WiFi.begin(WS_ssid, WS_password);
+
+  int timeout = 0;
+  while (WiFi.status() != WL_CONNECTED && timeout < 30) {
+    delay(100);
+    Serial.print(".");
+    timeout++;
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("[Auto] Reconnexion WS réussie !");
+
+    wifiMode = WIFI_MODE_WS;
+    WS_myIP = WiFi.localIP();
+
+    Serial.print("Nouvelle IP WS : ");
+    Serial.println(WS_myIP); 
+
+    connectMQTT();
+  }
+  else {
+    Serial.println("[Auto] Échec WS, reconnexion AP.");
+    wifiMode = WIFI_MODE_AP;
+    applyWifiMode();
   }
 }
 
