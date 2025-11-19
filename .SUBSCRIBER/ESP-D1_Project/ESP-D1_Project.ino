@@ -43,7 +43,7 @@ IPAddress WS_myIP;
 
 
 /* ---------------- MQTT (SUBSCRIBER) ---------------- */
-// ⚠️ A ADAPTER SELON TES IDENTIFIANTS ⚠️
+// A ADAPTER SELON LES IDENTIFIANTS
 const char* mqtt_server   = "192.168.1.2";
 const char* mqtt_topic    = "Greg";   // ex: "Test" / "usrX" / etc.
 const char* mqtt_username = "usr9";   // ex: "usrX"
@@ -68,6 +68,11 @@ const int WEB2 = GPIO_2;   // LED still alive
 int  buttonState = LOW;
 int  ledState    = LOW;
 bool etatRelais  = false;   // Variable bool pour ON/OFF relai
+
+// Mode auto / manuel du relai
+// true  = auto (piloté par H/T via MQTT)
+// false = manuel (web / console)
+bool autoRelaiFromHumidity = true;
 
 // Variables web
 int StateWEB0    = HIGH;           
@@ -122,8 +127,6 @@ MenuState menu = MENU_MAIN;
 void setRelai(bool on) {
   etatRelais = on;
   digitalWrite(PIN_RELAIS, etatRelais ? HIGH : LOW);  // inverse si relais actif niveau bas
-  Serial.print("[ACTIONNEUR] Relai ");
-  Serial.println(etatRelais ? "ON" : "OFF");
 }
 
 
@@ -233,6 +236,31 @@ void ReceivedMessage(char* topic, byte* payload, unsigned int length) {
     hasDhtData      = true;
     newDhtData      = true;      // déclenche un affichage au rythme du publisher
     dhtInfoPrinted  = false;     // on pourra réafficher les valeurs
+
+    // --- Gestion auto / manuel du relais en fonction de l'humidité ET de la température ---
+
+    // Zone dangereuse : H > 50% OU T > 35°C
+    bool danger = (humidity > 50.0f) || (temperature > 35.0f);
+    // Zone sûre : H ≤ 50% ET T ≤ 35°C
+    bool safe   = (humidity <= 50.0f) && (temperature <= 35.0f);
+
+    // Si on est en manuel et qu'on est toujours en zone dangereuse,
+    // on NE touche pas au relai (on respecte le choix manuel).
+    if (!autoRelaiFromHumidity && danger) {
+      return;
+    }
+
+    // Si on était en manuel et qu'on revient en zone sûre,
+    // on réarme le mode auto.
+    if (!autoRelaiFromHumidity && safe) {
+      autoRelaiFromHumidity = true;
+      // on laisse la suite appliquer la logique auto
+    }
+
+    // Mode auto : relai ON si danger, OFF sinon
+    if (autoRelaiFromHumidity) {
+      setRelai(danger);
+    }
   }
   // pas de Serial ici -> pas de spam MQTT
 }
@@ -336,14 +364,23 @@ void setup() {
 
   // Basculer le relais (toggle) via la page web
   server.on("/toggleRelay", []() {
+    // Dès qu'on clique sur le bouton, on passe en mode MANUEL
+    autoRelaiFromHumidity = false;
+
     setRelai(!etatRelais);
 
-    Serial.print(">>>WEB EVENT>>> Nouveau state relais = ");
+    Serial.print(">>>WEB EVENT>>> Nouveau state relais (manuel) = ");
     Serial.println(etatRelais ? "ON" : "OFF");
 
     String json = "{";
     json += "\"state\":" + String(etatRelais ? "true" : "false");
     json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  // Données DHT pour la page web (reçues via MQTT)
+  server.on("/dht", []() {
+    String json = getDHTjson(humidity, temperature, heatIndex);
     server.send(200, "application/json", json);
   });
 
@@ -416,8 +453,8 @@ void showRelaiMenu() {
   Serial.println(etatRelais ? "ON" : "OFF");
 
   Serial.println("Commandes disponibles :");
-  Serial.println("       ON        : Activer relai");
-  Serial.println("       OFF       : Désactiver relai");
+  Serial.println("       ON        : Activer relai (manuel)");
+  Serial.println("       OFF       : Désactiver relai (manuel)");
   Serial.println("  RETURN ou MENU : retour au menu principal\n");
 }
 
@@ -622,12 +659,14 @@ void parseCommand(String cmd) {
     }
 
     if (cmd.equalsIgnoreCase("ON")) {
+      autoRelaiFromHumidity = false;  // passage en manuel via la console aussi
       setRelai(true);
       showRelaiMenu();
       return;
     }
 
     if (cmd.equalsIgnoreCase("OFF")) {
+      autoRelaiFromHumidity = false;
       setRelai(false);
       showRelaiMenu();
       return;

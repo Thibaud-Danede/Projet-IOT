@@ -1,8 +1,6 @@
 #include "ESP-D1_Functions.h"
 
 String getPage() {
-  // String myIP_S = String(myIP[0]) + "." + String(myIP[1]) + "." +
-  //                 String(myIP[2]) + "." + String(myIP[3]);
 
   String html = R"rawliteral(
 <!DOCTYPE html>
@@ -45,6 +43,7 @@ String getPage() {
   }
   .on  { background:#c6f6d5; color:#166534; border:1px solid #16a34a; }
   .off { background:#fecaca; color:#991b1b; border:1px solid #ef4444; }
+
   button {
     padding: 12px 28px;
     margin-top: 20px;
@@ -59,22 +58,49 @@ String getPage() {
   button:hover {
     background:#1d4ed8;
   }
+
   #errorMsg { color:red; margin-top:10px; font-weight:bold; }
+
+  .value {
+    font-size: 22px;
+    font-weight: bold;
+    margin-top: 8px;
+  }
+
+  .alert {
+    margin-top: 12px;
+    padding: 10px 15px;
+    border-radius: 8px;
+    background:#fee2e2;
+    color:#991b1b;
+    border:1px solid #ef4444;
+    font-weight:bold;
+  }
 </style>
 </head>
 <body>
 
-<h1>Contrôle du relais</h1>
+<h1>Contrôle du relais & mesures DHT</h1>
 
 <div class="card">
-  <div class="ip">Point d'accès : )rawliteral";
 
-  //html += myIP_S;
 
-  html += R"rawliteral(</div>
-
-  <div class="state-label">État actuel :</div>
+  <div class="state-label">État du relais :</div>
   <div id="relayBadge" class="badge off">--</div>
+
+  <div class="state-label" style="margin-top:16px;">Humidité mesurée :</div>
+  <div id="humVal" class="value">-- %</div>
+
+  <div id="humAlert" class="alert" style="display:none;">
+    Alerte : humidité &gt; 50&nbsp;% – relais activé
+  </div>
+
+  <div class="state-label" style="margin-top:16px;">Température mesurée :</div>
+  <div id="tempVal" class="value">-- °C</div>
+
+  <div id="tempAlert" class="alert" style="display:none;">
+    Alerte : température &gt; 35&nbsp;°C – relais activé
+  </div>
 
   <button id="relayBtn" onclick="toggleRelay()">Basculer le relais</button>
 
@@ -82,6 +108,7 @@ String getPage() {
 </div>
 
 <script>
+// Met à jour l'affichage du relais (badge + texte du bouton)
 function updateUI(state) {
   const badge = document.getElementById('relayBadge');
   const btn   = document.getElementById('relayBtn');
@@ -99,6 +126,7 @@ function updateUI(state) {
   }
 }
 
+// Récupère l'état du relais
 function syncState() {
   fetch('/relayState')
     .then(r => r.json())
@@ -112,6 +140,48 @@ function syncState() {
     });
 }
 
+// Récupère l'humidité + température (JSON généré par getDHTjson) et gère les alertes
+function refreshDht() {
+  fetch('/dht')
+    .then(r => r.text())   // on lit en texte pour tolérer 'nan'
+    .then(txt => {
+      const humSpan   = document.getElementById('humVal');
+      const tempSpan  = document.getElementById('tempVal');
+      const humAlert  = document.getElementById('humAlert');
+      const tempAlert = document.getElementById('tempAlert');
+
+      // --- Humidité ---
+      const humMatch = txt.match(/"humidity":([^,}]+)/);
+      let hum = NaN;
+      if (humMatch) hum = parseFloat(humMatch[1]);
+
+      if (isNaN(hum)) {
+        humSpan.textContent  = "-- %";
+        humAlert.style.display = "none";
+      } else {
+        humSpan.textContent = hum.toFixed(1) + " %";
+        humAlert.style.display = hum > 50.0 ? "block" : "none";
+      }
+
+      // --- Température ---
+      const tempMatch = txt.match(/"temperature":([^,}]+)/);
+      let temp = NaN;
+      if (tempMatch) temp = parseFloat(tempMatch[1]);
+
+      if (isNaN(temp)) {
+        tempSpan.textContent  = "-- °C";
+        tempAlert.style.display = "none";
+      } else {
+        tempSpan.textContent = temp.toFixed(1) + " °C";
+        tempAlert.style.display = temp > 35.0 ? "block" : "none";
+      }
+    })
+    .catch(err => {
+      // en cas d'erreur on ne change rien à l'affichage
+    });
+}
+
+// Appelé quand on clique sur le bouton HTML
 function toggleRelay() {
   fetch('/toggleRelay')
     .then(r => r.json())
@@ -125,9 +195,15 @@ function toggleRelay() {
     });
 }
 
+// Rafraîchissement combiné : état relais + DHT
+function globalRefresh() {
+  syncState();
+  refreshDht();
+}
+
 // synchro initiale + maj régulière
-syncState();
-setInterval(syncState, 1000);
+globalRefresh();
+setInterval(globalRefresh, 1000);
 </script>
 
 </body>
@@ -136,7 +212,6 @@ setInterval(syncState, 1000);
 
   return html;
 }
-
 
 
 String getDHTjson(float humidity, float temperature, float heatIndex) {
