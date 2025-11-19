@@ -133,38 +133,46 @@ PubSubClient mqttClient(wifiClient);
    SETUP
    ======================================================================= */
 void setup() {
-  // Affectation de la led
+
+  /* ================================
+          INITIALISATIONS
+     ================================ */
+
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
 
-  // Lancement du capteur
   dht.begin();
 
-  // Activation du moniteur série
   Serial.begin(115200);
   delay(300);
   Serial.println("\nBOOT ESP-D1 ready to work");
 
-  // Affichage du menu
   showMainMenu();
 
-  // Application du mode wifi
-  applyWifiMode();
+  applyWifiMode();   // démarre AP/WS/KO correctement
 
 
-  // -------- WEB HANDLERS --------
-  // Page principale HTML
+  /* ================================
+         WEB HANDLERS (SITE)
+     ================================ */
+
+  /* --- Page principale HTML --- */
   server.on("/", []() {
       Serial.println(">>>WEB EVENT>>> Appel de l'index du site");
       server.send(200, "text/html", getPage());
   });
 
-  // Données JSON du DHT
+  /* --- JSON DHT --- */
   server.on("/dht", []() {
-      server.send(200, "application/json", getDHTjson(humidity, temperature, heatIndex));
+      server.send(200, "application/json",
+                  getDHTjson(humidity, temperature, heatIndex));
   });
 
-  // Commandes contrôle DHT
+
+  /* =====================================
+          HANDLERS DHT (SITE)
+     ===================================== */
+
   server.on("/startDHT", []() {
       menu = MENU_DHT;
       Serial.println(">>>WEB EVENT>>> DHT START depuis le site");
@@ -180,37 +188,98 @@ void setup() {
   });
 
   server.on("/dhtState", []() {
-    String json = "{";
-    json += "\"active\":" + String(menu == MENU_DHT ? "true" : "false");
-    json += "}";
-    server.send(200, "application/json", json);
+      String json = "{";
+      json += "\"active\":" + String(menu == MENU_DHT ? "true" : "false");
+      json += "}";
+      server.send(200, "application/json", json);
   });
 
-  server.on("/dhtInterval", []() {  
-    String json = "{";
-    json += "\"interval\":" + String(dhtInterval); 
-    json += "}";
-    server.send(200, "application/json", json);
+  server.on("/dhtInterval", []() {
+      String json = "{";
+      json += "\"interval\":" + String(dhtInterval);
+      json += "}";
+      server.send(200, "application/json", json);
   });
 
   server.on("/setDHTinterval", []() {
-    if (!server.hasArg("value")) {
-        server.send(400, "text/plain", "Missing value");
-        return;
-    }
-    int newVal = server.arg("value").toInt();
-    if (newVal < 100) newVal = 100;  // protection
+      if (!server.hasArg("value")) {
+          server.send(400, "text/plain", "Missing value");
+          return;
+      }
 
-    dhtInterval = newVal;
-    Serial.print(">>>WEB EVENT>>> Nouvelle intervale à ");
-    Serial.print(newVal);
-    Serial.println(" ms depuis le site");
-    server.send(200, "text/plain", "OK");
+      int newVal = server.arg("value").toInt();
+      if (newVal < 100) newVal = 100;
+
+      dhtInterval = newVal;
+
+      Serial.print(">>>WEB EVENT>>> Nouvelle intervalle à ");
+      Serial.print(newVal);
+      Serial.println(" ms depuis le site");
+
+      server.send(200, "text/plain", "OK");
   });
+
+
+  /* =====================================
+            HANDLERS WIFI (SITE)
+     ===================================== */
+
+  // JSON du statut WiFi
+  server.on("/wifiState", []() {
+      String json = "{";
+      json += "\"mode\":\"" + String(
+                wifiMode == WIFI_MODE_AP ? "AP" :
+                wifiMode == WIFI_MODE_WS ? "WS" : "KO"
+              ) + "\",";
+      json += "\"connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
+      json += "\"autoreco\":" + String(autoReconnectEnabled ? "true" : "false") + ",";
+      json += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
+      json += "}";
+      server.send(200, "application/json", json);
+  });
+
+
+  /* --- Passage AP --- */
+  server.on("/wifiAP", []() {
+      Serial.println(">>>WEB EVENT>>> Passage en mode AP depuis le site");
+      wifiMode = WIFI_MODE_AP;
+      applyWifiMode();
+      server.send(200, "text/plain", "OK");
+  });
+
+  /* --- Passage WS --- */
+  server.on("/wifiWS", []() {
+      Serial.println(">>>WEB EVENT>>> Passage en mode WS depuis le site");
+      wifiMode = WIFI_MODE_WS;
+      applyWifiMode();
+      server.send(200, "text/plain", "OK");
+  });
+
+  /* --- Passage KO --- */
+  server.on("/wifiKO", []() {
+      Serial.println(">>>WEB EVENT>>> Passage en mode KO depuis le site");
+      wifiMode = WIFI_MODE_KO;
+      applyWifiMode();
+      server.send(200, "text/plain", "OK");
+  });
+
+  /* --- Toggle AUTO RECO --- */
+  server.on("/wifiRecoToggle", []() {
+      autoReconnectEnabled = !autoReconnectEnabled;
+      Serial.print(">>>WEB EVENT>>> RECO TOGGLE : ");
+      Serial.println(autoReconnectEnabled ? "ON" : "OFF");
+      server.send(200, "text/plain", autoReconnectEnabled ? "ON" : "OFF");
+  });
+
+
+  /* ================================
+            DÉMARRAGE SERVEUR
+     ================================ */
 
   server.begin();
   Serial.println("HTTP server started");
 }
+
 
 
 /* =======================================================================

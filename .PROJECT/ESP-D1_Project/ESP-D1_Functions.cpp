@@ -10,47 +10,144 @@ String getPage() {
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>DHT Monitor</title>
+<title>DHT + WiFi Dashboard</title>
+
 <style>
-  body { font-family: Arial; text-align: center; background: #eef; padding-top: 40px; }
-  .box { display: inline-block; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 0 10px #aaa; }
-  h1 { color: #006; }
+  body {
+    font-family: Arial;
+    background: #eef;
+    padding: 25px;
+  }
+
+  .container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 50px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+
+  .column.dhtBox {
+    background: #ffffff;
+    padding: 30px;
+    border-radius: 15px;
+    width: 420px;
+    box-shadow: 0 0 18px rgba(0,0,0,0.25);
+    border-left: 8px solid #3366ff;
+    text-align: center;
+  }
+
+  .column.wifiBox {
+    background: #ffffff;
+    padding: 25px;
+    border-radius: 12px;
+    width: 320px;
+    box-shadow: 0 0 12px rgba(0,0,0,0.20);
+    text-align: center;
+  }
+
+  h1 {
+    text-align: center;
+    color: #003;
+    margin-bottom: 10px;
+  }
+
+  h2 {
+    color: #003;
+    margin-bottom: 18px;
+  }
+
+  h3 {
+    margin-top: 20px;
+    color: #004;
+  }
+
+  .value {
+    font-size: 32px;
+    font-weight: bold;
+    color: #003399;
+  }
+
   button {
     padding: 12px 25px;
-    margin: 15px;
-    font-size: 20px;
+    margin-top: 12px;
+    font-size: 18px;
     border-radius: 8px;
     border: none;
     color: white;
     cursor: pointer;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
   }
+
   .start { background: #4477dd; }
   .stop  { background: #cc3333; }
-  #errorMsg { color: red; font-weight: bold; margin-top: 8px; }
+
+  .wifiBtn { background:#228855; width: 80%; }
+  .wifiKO  { background:#aa2222; width: 80%; }
+
+  #errorMsg { color: red; font-weight: bold; margin-top: 10px; }
 </style>
 </head>
 <body>
 
-<h1>Mesures du capteur DHT11</h1>
+<h1>Dashboard Capteur + WiFi</h1>
 
-<div class="box">
-  <p>Humidité : <span id="hum">--</span> %</p>
-  <p>Température : <span id="temp">--</span> °C</p>
-  <p>Heat Index : <span id="hi">--</span></p>
+<div class="container">
+
+  <!-- ===== COLONNE DHT ===== -->
+  <div class="column dhtBox">
+
+    <h2>Mesures DHT11</h2>
+
+    <p>Humidité : <span class="value" id="hum">--</span> %</p>
+    <p>Température : <span class="value" id="temp">--</span> °C</p>
+    <p>Heat Index : <span class="value" id="hi">--</span></p>
+
+    <h3>Contrôle du capteur</h3>
+    <button id="dhtBtn" class="start" onclick="toggleDHT()">Démarrer DHT</button>
+
+    <h3>Intervalle d’acquisition (ms)</h3>
+    <input type="number" id="intervalInput" min="100" step="1"
+           style="font-size:18px; padding:8px; width:160px; text-align:center;">
+    <br>
+    <button onclick="setIntervalValue()" style="background:#555; margin-top:10px;">Valider</button>
+
+    <div id="errorMsg"></div>
+  </div>
+
+
+
+  <!-- ===== COLONNE WIFI ===== -->
+  <div class="column wifiBox">
+
+    <h2>État WiFi</h2>
+
+    <p>Mode actuel : <span class="value" id="wm">--</span></p>
+    <p>Connexion : <span class="value" id="wc">--</span></p>
+    <p>Adresse IP : <span class="value" id="wip">--</span></p>
+    <p>Reconnexion auto : <span class="value" id="wr">--</span></p>
+
+    <br>
+
+    <button onclick="setAP()" class="wifiBtn">Passer en AP</button>
+    <button onclick="setWS()" class="wifiBtn">Passer en WS</button>
+    <button onclick="setKO()" class="wifiKO">Passer en KO</button>
+    <button onclick="toggleReco()" style="background:#555; width:80%; margin-top:15px;">
+      Toggle Reconnexion Auto
+    </button>
+  </div>
+
 </div>
 
-<h2>Contrôle du capteur</h2>
-
-<button id="dhtBtn" class="start" onclick="toggleDHT()">Démarrer DHT</button>
-
-<h3>Intervalle d’acquisition (ms)</h3>
-
-<input type="number" id="intervalInput" min="100" step="1" style="font-size:20px; padding:5px;">
-<button onclick="setIntervalValue()" style="background:#555;">Valider</button>
-
-<div id="errorMsg"></div>
 
 <script>
+
+///////////////////////////////////
+//        DHT FUNCTIONS
+///////////////////////////////////
 
 function syncState() {
   fetch("/dhtState")
@@ -88,7 +185,6 @@ function setIntervalValue() {
     err.textContent = "L’intervalle doit être ≥ 100 ms.";
     return;
   }
-
   err.textContent = "";
   fetch("/setDHTinterval?value=" + value);
 }
@@ -114,10 +210,63 @@ function updateDHT() {
     });
 }
 
+
+
+///////////////////////////////////
+//        WIFI MANAGEMENT
+///////////////////////////////////
+
+function refreshWifi() {
+  fetch("/wifiState")
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById("wm").textContent  = data.mode;
+      document.getElementById("wc").textContent  = data.connected ? "Connecté" : "Déconnecté";
+      document.getElementById("wip").textContent = data.ip;
+      document.getElementById("wr").textContent  = data.autoreco ? "ON" : "OFF";
+    });
+}
+
+
+// === POPUP DE CONFIRMATION POUR CHAQUE ACTION ===
+
+function setAP() {
+  if (confirm("⚠️ Vous allez passer en mode AP.\nVous devrez vous reconnecter au WiFi de l’ESP.\nContinuer ?")) {
+    fetch("/wifiAP").then(refreshWifi);
+  }
+}
+
+function setWS() {
+  if (confirm("⚠️ Passage en mode WS.\nSi la connexion échoue, l’accès au site sera perdu.\nContinuer ?")) {
+    fetch("/wifiWS").then(refreshWifi);
+  }
+}
+
+function setKO() {
+  if (confirm("⚠️ MODE KO : Le WiFi sera désactivé.\nVous perdrez immédiatement l’accès au site.\nContinuer ?")) {
+    fetch("/wifiKO").then(refreshWifi);
+  }
+}
+
+function toggleReco() {
+  if (confirm("Basculer l'état de la reconnexion automatique ?")) {
+    fetch("/wifiRecoToggle").then(refreshWifi);
+  }
+}
+
+
+
+///////////////////////////////////
+//            INIT
+///////////////////////////////////
+
 syncState();
 syncInterval();
 updateDHT();
-setInterval(updateDHT, 100);
+setInterval(updateDHT, 120);
+
+refreshWifi();
+setInterval(refreshWifi, 2000);
 
 </script>
 
@@ -127,6 +276,10 @@ setInterval(updateDHT, 100);
 
     return html;
 }
+
+
+
+
 
 /* =======================================================================
    ACQUISITION DONNEES
