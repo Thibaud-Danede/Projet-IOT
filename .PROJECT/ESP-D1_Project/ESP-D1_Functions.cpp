@@ -161,19 +161,31 @@ void showDHTMenu() {
 
 void showWifiMenu() {
   Serial.println("\n=== MENU WIFI ===");
-  Serial.print("Mode actuel : ");
-  Serial.println(wifiMode == WIFI_MODE_AP ? "AP" : "WS");
+  Serial.print("wifiMode = ");
+  switch (wifiMode) {
+    case WIFI_MODE_AP: Serial.println("AP"); break;
+    case WIFI_MODE_WS: Serial.println("WS"); break;
+    case WIFI_MODE_KO: Serial.println("KO"); break;
+  }
+
+  // --- État réel du WiFi ---
+  Serial.print("Etat WiFi réel : ");
+  int st = WiFi.status();   // ESP8266 : retourne un int
+  if (st == WL_CONNECTED) Serial.println("CONNECTÉ");
+  else Serial.println("DÉCONNECTÉ");
+
   Serial.print("Auto-reconnexion WS : ");
   Serial.println(autoReconnectEnabled ? "ON" : "OFF");
 
-
-  Serial.println("Commandes disponibles :");
-  Serial.println("       AP        : passer en Access Point");
-  Serial.println("       WS        : passer en Station");
-  Serial.println("       RECO      : Activer/Désactiver reconnection automatique");
-  Serial.println("       KILL      : passer en mode KO");
-  Serial.println("  RETURN ou MENU : retour au menu principal\n");
+  Serial.println("\nCommandes disponibles :");
+  Serial.println("  AP       : passer en Access Point");
+  Serial.println("  WS       : passer en Station");
+  Serial.println("  RECO     : activer/désactiver reconnect auto");
+  Serial.println("  KILL     : mettre le WiFi en KO");
+  Serial.println("  RETURN   : retour menu principal\n");
 }
+
+
 
 
 /* =======================================================================

@@ -2,6 +2,7 @@
 #define ESP_D1_FUNCTIONS_H
 
 #include <Arduino.h>
+#include <ESP8266WiFi.h>
 
 // Renvoie la page HTML complète
 String getPage();
