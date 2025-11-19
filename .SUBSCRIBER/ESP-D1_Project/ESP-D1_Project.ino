@@ -59,7 +59,7 @@ const int LED_PIN    = D5;
 const int BUTTON_PIN = D7;
 const int PIN_RELAIS = D1;  // pin relai selon câblage actuel
 
-// GPIO à modifier plus tard pour la partie web
+// GPIO pour la partie web / debug
 const int WEB0 = GPIO_0;   // LED ou sortie pour debug
 const int WEB2 = GPIO_2;   // LED still alive
 
@@ -77,7 +77,10 @@ int StateWEB2    = LOW;
 float humidity    = NAN;
 float temperature = NAN;
 float heatIndex   = NAN;
-bool  hasDhtData  = false;   // true après première réception MQTT
+
+bool hasDhtData      = false;  // true après réception de données valides
+bool dhtInfoPrinted  = false;  // pour ne pas spammer "Aucune donnée ..."
+bool newDhtData      = false;  // passe à true à chaque message DHT reçu
 
 // Etats Wifi
 enum WifiModeState { 
@@ -89,11 +92,7 @@ WifiModeState wifiMode = WIFI_MODE_AP;   // démarrage par défaut en AP
 
 /* ---------------- TIMERS ---------------- */
 long previousMillisBtn = 0;
-long previousMillisDHT = 0;
 long buttonInterval    = 500;
-long dhtInterval       = 1000;  // 1 s
-long tempInterval      = 1000;
-long humiInterval      = 1000;
 
 // Timer LED still alive (WEB2)
 long previousMillis_2  = 0; 
@@ -208,7 +207,19 @@ void ReceivedMessage(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
-  // Cas 2 : JSON avec humidity/temperature/heatindex
+  // Cas 2 : message "DHT STOP" -> arrêt de l'affichage DHT
+  if (msg.equalsIgnoreCase("DHT STOP") || msg.indexOf("DHT STOP") != -1) {
+    hasDhtData      = false;
+    newDhtData      = false;
+    dhtInfoPrinted  = false;
+    humidity        = NAN;
+    temperature     = NAN;
+    heatIndex       = NAN;
+    Serial.println("MQTT : DHT STOP reçu, arrêt de la lecture des valeurs.");
+    return;
+  }
+
+  // Cas 3 : JSON avec humidity/temperature/heatindex
   float h  = extractJsonFloat(msg, "humidity");
   float t  = extractJsonFloat(msg, "temperature");
   float hi = extractJsonFloat(msg, "heatindex");
@@ -219,12 +230,14 @@ void ReceivedMessage(char* topic, byte* payload, unsigned int length) {
     if (!isnan(hi)) {
       heatIndex = hi;
     }
-    hasDhtData = true;
+    hasDhtData      = true;
+    newDhtData      = true;      // déclenche un affichage au rythme du publisher
+    dhtInfoPrinted  = false;     // on pourra réafficher les valeurs
   }
-  // Pas de Serial.print ici -> aucune ligne "[MQTT] ..." dans la console
+  // pas de Serial ici -> pas de spam MQTT
 }
 
-// Connexion au broker + abonnement au topic (copié de l'exemple)
+// Connexion au broker + abonnement au topic
 bool Connect() {
   if (client.connect(clientID, mqtt_username, mqtt_password)) {
     client.subscribe(mqtt_topic);
@@ -240,7 +253,7 @@ bool Connect() {
 
 
 /* =======================================================================
-   Blink Led (Still Alive) comme l'exemple
+   Blink Led (Still Alive)
    ======================================================================= */
 void BlinkLed(int GPIO, int *StateGPIO, long *previousMillis, long intervalMillis){
   unsigned long currentMillis = millis();
@@ -270,7 +283,6 @@ void showHumiMenu();
 void showRelaiMenu();
 void applyWifiMode();
 void readButton();
-void readDHT();
 void parseCommand(String cmd);
 void serialEvent();
 void doEvery(long intervalMillis, long *previousMillis, void (*action)());
@@ -303,10 +315,10 @@ void setup() {
   // -------- WIFI MANAGEMENT (AP ou STA suivant wifiMode) --------
   applyWifiMode();
 
-  // -------- MQTT : définition du callback --------
+  // -------- MQTT : callback --------
   client.setCallback(ReceivedMessage);
 
-  // -------- WEB HANDLERS modernes (pour ta page HTML) --------
+  // -------- WEB HANDLERS --------
 
   // Page principale HTML
   server.on("/", []() {
@@ -357,7 +369,6 @@ void showButtonMenu() {
   Serial.println("\n=== MENU BOUTON ===");
   Serial.println("Affichage des valeurs du bouton...");
   Serial.println("Commandes disponibles :");
-  Serial.println("  BUTTONSET <ms>   : changer intervalle lecture");
   Serial.println("  RETURN ou MENU   : retour au menu principal\n");
 }
 
@@ -365,8 +376,9 @@ void showDHTMenu() {
   Serial.println("\n=== MENU DHT ===");
   Serial.println("Affichage des valeurs du DHT (Temp + Humi via MQTT)...");
   Serial.println("Commandes disponibles :");
-  Serial.println("  DHTSET <ms>     : changer intervalle affichage");
   Serial.println("  RETURN ou MENU  : retour au menu principal\n");
+  dhtInfoPrinted = false;
+  if (hasDhtData) newDhtData = true;   // affiche la dernière valeur dès l'entrée
 }
 
 void showWifiMenu() {
@@ -384,16 +396,18 @@ void showTempMenu() {
   Serial.println("\n=== MENU Temp ===");
   Serial.println("Affichage de la TEMPERATURE seulement (via MQTT)...");
   Serial.println("Commandes disponibles :");
-  Serial.println("  TEMPSET <ms>   : changer intervalle affichage");
   Serial.println("  RETURN ou MENU : retour au menu principal\n");
+  dhtInfoPrinted = false;
+  if (hasDhtData) newDhtData = true;
 }
 
 void showHumiMenu() {
   Serial.println("\n=== MENU Humi ===");
   Serial.println("Affichage de l'HUMIDITE seulement (via MQTT)...");
   Serial.println("Commandes disponibles :");
-  Serial.println("  HUMISET <ms>   : changer intervalle affichage");
   Serial.println("  RETURN ou MENU : retour au menu principal\n");
+  dhtInfoPrinted = false;
+  if (hasDhtData) newDhtData = true;
 }
 
 void showRelaiMenu() {
@@ -413,26 +427,12 @@ void showRelaiMenu() {
    ======================================================================= */
 void loop() {
 
-  // LED Still Alive sur WEB2 (clignotement lent façon exemple)
+  // LED Still Alive sur WEB2 (clignotement lent)
   BlinkLed(WEB2, &StateWEB2, &previousMillis_2, intervalMillis_2);
 
   // Lecture bouton seulement dans le menu bouton
   if (menu == MENU_BUTTON) {
     doEvery(buttonInterval, &previousMillisBtn, readButton);
-  }
-
-  // Affichage DHT suivant le menu :
-  // - MENU_DHT  : temp + humi
-  // - MENU_TEMP : seulement temp
-  // - MENU_HUMI : seulement humi
-  if (menu == MENU_DHT) {
-    doEvery(dhtInterval, &previousMillisDHT, readDHT);
-  }
-  if (menu == MENU_TEMP) {
-    doEvery(tempInterval, &previousMillisDHT, readDHT);
-  }
-  if (menu == MENU_HUMI) {
-    doEvery(humiInterval, &previousMillisDHT, readDHT);
   }
 
   // Lecture série
@@ -442,6 +442,40 @@ void loop() {
     parseCommand(inputString);
     inputString = "";
     stringComplete = false;
+  }
+
+  // Affichage lié au DHT : UNIQUEMENT quand nouvelles données MQTT
+  if (menu == MENU_DHT || menu == MENU_TEMP || menu == MENU_HUMI) {
+
+    // Si on n'a plus de données (après DHT STOP)
+    if (!hasDhtData) {
+      if (!dhtInfoPrinted) {
+        Serial.println("Aucune donnée DHT reçue via MQTT pour le moment.");
+        dhtInfoPrinted = true;
+      }
+    }
+    else if (newDhtData) {
+      // On a reçu de nouvelles données, on affiche UNE fois
+      if (menu == MENU_DHT) {
+        Serial.print("Humidite : ");
+        Serial.print(humidity, 1);
+        Serial.print(" %  |  ");
+        Serial.print("Temperature : ");
+        Serial.print(temperature, 1);
+        Serial.println(" °C");
+      }
+      else if (menu == MENU_TEMP) {
+        Serial.print("Temperature : ");
+        Serial.print(temperature, 1);
+        Serial.println(" °C");
+      }
+      else if (menu == MENU_HUMI) {
+        Serial.print("Humidite : ");
+        Serial.print(humidity, 1);
+        Serial.println(" %");
+      }
+      newDhtData = false;   // on a consommé la nouvelle mesure
+    }
   }
 
   // Serveur web
@@ -479,40 +513,6 @@ void readButton() {
 
 
 /* =======================================================================
-   Fonction "readDHT" -> AFFICHER les valeurs MQTT selon le menu
-   ======================================================================= */
-void readDHT() {
-  if (!hasDhtData) {
-    Serial.println("Aucune donnée DHT reçue via MQTT pour le moment.");
-    return;
-  }
-
-  if (menu == MENU_DHT) {
-    // Temp + Humi
-    Serial.print("Humidite : ");
-    Serial.print(humidity, 1);
-    Serial.print(" %  |  ");
-
-    Serial.print("Temperature : ");
-    Serial.print(temperature, 1);
-    Serial.println(" °C");
-  }
-  else if (menu == MENU_TEMP) {
-    // Seulement température
-    Serial.print("Temperature : ");
-    Serial.print(temperature, 1);
-    Serial.println(" °C");
-  }
-  else if (menu == MENU_HUMI) {
-    // Seulement humidité
-    Serial.print("Humidite : ");
-    Serial.print(humidity, 1);
-    Serial.println(" %");
-  }
-}
-
-
-/* =======================================================================
    Analyse des commandes utilisateur
    ======================================================================= */
 void parseCommand(String cmd) {
@@ -542,22 +542,6 @@ void parseCommand(String cmd) {
       return;
     }
 
-    if (cmd.startsWith("BUTTONSET")) {
-      String valueStr = cmd.substring(9);
-      valueStr.trim();
-      long newInterval = valueStr.toInt();
-
-      if (newInterval > 0) {
-        buttonInterval = newInterval;
-        Serial.print("Nouvel intervalle = ");
-        Serial.print(buttonInterval);
-        Serial.println(" ms");
-      } else {
-        Serial.println("Erreur: donnée non valide.");
-      }
-      return;
-    }
-
     Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
     return;
   }
@@ -568,22 +552,6 @@ void parseCommand(String cmd) {
     if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
       menu = MENU_MAIN;
       showMainMenu();
-      return;
-    }
-
-    if (cmd.startsWith("DHTSET")) {
-      String valueStr = cmd.substring(6);
-      valueStr.trim();
-      long newInterval = valueStr.toInt();
-
-      if (newInterval > 0) {
-        dhtInterval = newInterval;
-        Serial.print("Nouvel intervalle = ");
-        Serial.print(dhtInterval);
-        Serial.println(" ms depuis la console");
-      } else {
-        Serial.println("Erreur: donnée non valide.");
-      }
       return;
     }
 
@@ -600,22 +568,6 @@ void parseCommand(String cmd) {
       return;
     }
 
-    if (cmd.startsWith("TEMPSET")) {
-      String valueStr = cmd.substring(7);
-      valueStr.trim();
-      long newInterval = valueStr.toInt();
-
-      if (newInterval > 0) {
-        tempInterval = newInterval;
-        Serial.print("Nouvel intervalle Temp = ");
-        Serial.print(tempInterval);
-        Serial.println(" ms");
-      } else {
-        Serial.println("Erreur: donnée non valide.");
-      }
-      return;
-    }
-
     Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
     return;
   }
@@ -626,22 +578,6 @@ void parseCommand(String cmd) {
     if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
       menu = MENU_MAIN;
       showMainMenu();
-      return;
-    }
-
-    if (cmd.startsWith("HUMISET")) {
-      String valueStr = cmd.substring(7);
-      valueStr.trim();
-      long newInterval = valueStr.toInt();
-
-      if (newInterval > 0) {
-        humiInterval = newInterval;
-        Serial.print("Nouvel intervalle Humi = ");
-        Serial.print(humiInterval);
-        Serial.println(" ms");
-      } else {
-        Serial.println("Erreur: donnée non valide.");
-      }
       return;
     }
 
@@ -662,14 +598,12 @@ void parseCommand(String cmd) {
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
       Serial.println("Mode AP activé.");
-      showWifiMenu();
       return;
     }
 
     if (cmd.equalsIgnoreCase("STA")) {
       wifiMode = WIFI_MODE_WS;
       applyWifiMode();
-      showWifiMenu();
       return;
     }
 
