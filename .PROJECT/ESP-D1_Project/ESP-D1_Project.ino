@@ -133,18 +133,22 @@ PubSubClient mqttClient(wifiClient);
    SETUP
    ======================================================================= */
 void setup() {
+  // Affectation de la led
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
 
+  // Lancement du capteur
   dht.begin();
 
+  // Activation du moniteur série
   Serial.begin(115200);
   delay(300);
   Serial.println("\nBOOT ESP-D1 ready to work");
 
+  // Affichage du menu
   showMainMenu();
 
-  // -------- WIFI MANAGEMENT --------
+  // Application du mode wifi
   applyWifiMode();
 
 
@@ -238,9 +242,8 @@ void loop() {
 
   // Verification continue de l'état de l'AP
   checkAP();
-  // Tentative de reconnection itérative
+  // Tentative de reconnection périodique (30 secondes contrôlées par reconnectInterval)
   autoReconnectWS();
-
 
   //Handle du site web
   server.handleClient();
@@ -253,10 +256,11 @@ void loop() {
 /* =======================================================================
    Fonctions Still Alive
    ======================================================================= */
+// Acquisition de l'intervale à laquelle clignoter
 long getAliveInterval() {
 
   if (wifiMode == WIFI_MODE_WS) {
-    // Mode Station : vérifier si réellement connecté
+    // Mode Station pour vérifier si réellement connecté
     if (WiFi.status() == WL_CONNECTED)
       return 3000;  // connecté WS
     else
@@ -264,17 +268,15 @@ long getAliveInterval() {
   }
 
   if (wifiMode == WIFI_MODE_AP) {
-    // Mode AP : toujours ok
     return 1000;
   }
-
-  // fallback sécurité
   return 100;
 }
 
+// Appel du clignotement de la led en fonction de l'état du système
 void stillAlive() {
   static bool led = false;
-
+  // Contrôle du changement d'état de la led
   led = !led;
   digitalWrite(LED_PIN, led ? HIGH : LOW);
 }
@@ -289,12 +291,13 @@ void parseCommand(String cmd) {
 
   /* --- COMMANDE MENU PRINCIPAL --- */
   if (menu == MENU_MAIN) {
+    // Lance le défilé du DHT
     if (cmd == "1") {
-      //Serial.println("Option 2 non encore implémentée.");
       menu = MENU_DHT;
       showDHTMenu();
       return;
     }
+    // Affiche le menu WiFi
     if (cmd == "2") {
       menu = MENU_WIFI;
       showWifiMenu();
@@ -305,9 +308,8 @@ void parseCommand(String cmd) {
     return;
   }
 
-    /* === COMMANDE MENU DHT === */
+  /* --- COMMANDE MENU DHT --- */
   if (menu == MENU_DHT) {
-
     // Retour au menu principal
     if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
     menu = MENU_MAIN;
@@ -315,13 +317,13 @@ void parseCommand(String cmd) {
     return;
     }
 
-    // DHTSET <ms>
+    // DHTSET <ms>, l'utilisateur entre à côté de DHTSET sa nouvelle intervalle
     if (cmd.startsWith("DHTSET")) {
-
       String valueStr = cmd.substring(6);
       valueStr.trim();
       long newInterval = valueStr.toInt();
 
+      // Valide seulement si la requête est > 0
       if (newInterval > 0) {
         dhtInterval = newInterval;
         Serial.print("Nouvel intervalle = ");
@@ -333,30 +335,30 @@ void parseCommand(String cmd) {
       return;
     }
     //Réponse à l'ereur
-    Serial.println("Commande inconnue. Tapez RETURN pour revenir au menu principal.");
+    Serial.println("Commande inconnue. Tapez RETURN ou MENU pour revenir au menu principal.");
     return;
   }
   /* === COMMANDE MENU WIFI === */
   if (menu == MENU_WIFI) {
-
+    // Commande de retour au menu
     if (cmd.equalsIgnoreCase("return") || cmd.equalsIgnoreCase("menu") || cmd.equalsIgnoreCase("stop")) {
       menu = MENU_MAIN;
       showMainMenu();
       return;
     }
-
+    //Lance l'état Access Point
     if (cmd.equalsIgnoreCase("AP")) {
       wifiMode = WIFI_MODE_AP;
       applyWifiMode();
       return;
     }
-
+    // Lance l'état Work Station
     if (cmd.equalsIgnoreCase("WS")) {
       wifiMode = WIFI_MODE_WS;
       applyWifiMode();
       return;
     }
-
+    // Force l'état KO
     if (cmd.equalsIgnoreCase("KILL")) {
       wifiMode = WIFI_MODE_KO;
       Serial.println("Mode WiFi mis en carafe !");
@@ -364,12 +366,11 @@ void parseCommand(String cmd) {
     return;
     }
 
-    // Toggle de la reconnection automatique
+    // Toggle de la reconnexion automatique
     if (cmd.equalsIgnoreCase("RECO")) {
       autoReconnectEnabled = !autoReconnectEnabled;  // TOGGLE
       Serial.print("Reconnexion automatique : ");
       Serial.println(autoReconnectEnabled ? "ACTIVÉE" : "DÉSACTIVÉE");
-      //showWifiMenu();
       return;
     }
 
@@ -385,7 +386,7 @@ void parseCommand(String cmd) {
    ======================================================================= */
 void applyWifiMode() {
 
-  // Mode AP
+  /* --- Mode AP --- */
   if (wifiMode == WIFI_MODE_AP) {
     Serial.println("\n[WiFi] Passage en mode ACCESS POINT...");
 
@@ -411,7 +412,7 @@ void applyWifiMode() {
     return;
   }
 
-  // Mode WS
+  /* --- Mode AP --- */
   if (wifiMode == WIFI_MODE_WS) {
     Serial.println("\n[WiFi] Passage en mode STATION...");
 
@@ -463,7 +464,6 @@ void applyWifiMode() {
 }
 
 
-
 /* =======================================================================
    Vérification continuelle de l'AP
    ======================================================================= */
@@ -477,7 +477,6 @@ void checkAP() {
     }
   }
 }
-
 
 
 /* =======================================================================
@@ -533,7 +532,6 @@ void autoReconnectWS() {
     applyWifiMode();
   }
 }
-
 
 
 /* =======================================================================
