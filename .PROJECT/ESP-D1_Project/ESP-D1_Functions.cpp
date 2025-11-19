@@ -1,5 +1,8 @@
 #include "ESP-D1_Functions.h"
 
+/* =======================================================================
+   CREATION DE LA PAGE WEB
+   ======================================================================= */
 String getPage() {
 
     String html = R"rawliteral(
@@ -125,11 +128,80 @@ setInterval(updateDHT, 100);
     return html;
 }
 
-
+/* =======================================================================
+   ACQUISITION DONNEES
+   ======================================================================= */
 String getDHTjson(float humidity, float temperature, float heatIndex) {
     return "{"
            "\"humidity\":" + String(humidity, 1) + "," +
            "\"temperature\":" + String(temperature, 1) + "," +
            "\"heatindex\":" + String(heatIndex, 1) +
            "}";
+}
+
+
+/* =======================================================================
+   MENU AFFICHAGE
+   ======================================================================= */
+void showMainMenu() {
+  Serial.println("\n======== MENU PRINCIPAL ========");
+  Serial.println("Tapez dans l'invite de commande le numéro du paramètre que vous voulez régler");
+  Serial.println("1 : Visualiser et gérer l’acquisition du DHT");
+  Serial.println("2 : Visualiser et gérer l’accès WiFi");
+
+}
+
+void showDHTMenu() {
+  Serial.println("\n=== MENU DHT ===");
+  Serial.println("Affichage des valeurs du dht...");
+  Serial.println("Commandes disponibles :");
+  Serial.println("  DHTSET <ms>     : changer intervalle lecture");
+  Serial.println("  RETURN ou MENU  : retour au menu principal\n");
+}
+
+void showWifiMenu() {
+  Serial.println("\n=== MENU WIFI ===");
+  Serial.print("Mode actuel : ");
+  Serial.println(wifiMode == WIFI_MODE_AP ? "AP" : "WS");
+  Serial.print("Auto-reconnexion WS : ");
+  Serial.println(autoReconnectEnabled ? "ON" : "OFF");
+
+
+  Serial.println("Commandes disponibles :");
+  Serial.println("       AP        : passer en Access Point");
+  Serial.println("       WS        : passer en Station");
+  Serial.println("       RECO      : Activer/Désactiver reconnection automatique");
+  Serial.println("       KILL      : passer en mode KO");
+  Serial.println("  RETURN ou MENU : retour au menu principal\n");
+}
+
+
+/* =======================================================================
+   Fonction lecture dht
+   ======================================================================= */
+void readDHT() {
+
+  humidity = dht.readHumidity();
+
+  temperature = dht.readTemperature();
+
+  if (isnan(humidity) || isnan(temperature)) {
+    Serial.println(F("Failed to read from DHT sensor!"));
+  }
+  else {
+    // Compute heat index in Celsius (isFahreheit = false)
+    heatIndex = dht.computeHeatIndex(temperature, humidity, false);
+  
+    Serial.print(F("Humidity: "));
+    Serial.print(humidity);
+    Serial.print(F("%  Temperature: "));
+    Serial.print(temperature);
+    Serial.print(F("°C "));
+    Serial.print(F("  Heat index: "));
+    Serial.println(heatIndex);
+
+    // MQTT publication 
+    String payload = "{\"humidity\":" + String(humidity,1) + ",\"temperature\":" + String(temperature,1) + ",\"heatIndex\":" + String(heatIndex,1) + ",\"signature\":\"Thibaud\"}";
+    mqttPublish(payload);
+  }
 }
